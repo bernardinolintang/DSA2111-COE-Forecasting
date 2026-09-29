@@ -1,0 +1,72 @@
+# PostgreSQL with a persistent volume. One replica: a database is stateful, so
+# it is not scaled like the stateless API / web pods.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coe-db-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coe-db
+  labels: { app: coe-db }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                 # never run two Postgres pods on the same volume
+  selector:
+    matchLabels: { app: coe-db }
+  template:
+    metadata:
+      labels: { app: coe-db }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: coe
+            - name: POSTGRES_USER
+              value: coe
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: coe-db, key: password }
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "coe", "-d", "coe"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "coe", "-d", "coe"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: coe-db-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coe-db
+spec:
+  selector: { app: coe-db }
+  ports:
+    - port: 5432
+      targetPort: 5432

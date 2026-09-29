@@ -1,0 +1,81 @@
+# The ML pipeline runs as batch work, not as a long-lived service:
+#  * a Job runs the full pipeline (backtest + cross-validation + training) once
+#    after deployment
+#  * a CronJob does a quick retrain + forecast (no backtest) after each bidding
+#    exercise. Bidding closes on Wednesdays at 4pm, so it runs every Wednesday
+#    evening (Singapore time), reusing the epoch count chosen by the full run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: coe-ml-initial
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app: coe-ml }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: ml
+          image: coe-ml             # rewritten to the registry image by kustomization.yaml
+          args: ["run"]
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: coe-db, key: password }
+            - name: DATABASE_URL
+              value: postgresql+psycopg://coe:$(POSTGRES_PASSWORD)@coe-db:5432/coe
+            - name: COE_WORKERS
+              valueFrom:
+                configMapKeyRef: { name: coe-config, key: COE_WORKERS }
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+          volumeMounts:
+            - name: shm             # worker processes need more than the default 64 MB /dev/shm
+              mountPath: /dev/shm
+      volumes:
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 512Mi }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: coe-ml-retrain
+spec:
+  schedule: "30 17 * * 3"
+  timeZone: Asia/Singapore
+  concurrencyPolicy: Forbid          # never train two models at once
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels: { app: coe-ml }
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: ml
+              image: coe-ml
+              args: ["run", "--skip-backtest"]
+              env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: coe-db, key: password }
+                - name: DATABASE_URL
+                  value: postgresql+psycopg://coe:$(POSTGRES_PASSWORD)@coe-db:5432/coe
+                - name: COE_WORKERS
+                  valueFrom:
+                    configMapKeyRef: { name: coe-config, key: COE_WORKERS }
+              resources:
+                requests: { cpu: "1", memory: 1Gi }
+                limits: { cpu: "2", memory: 3Gi }
+              volumeMounts:
+                - name: shm
+                  mountPath: /dev/shm
+          volumes:
+            - name: shm
+              emptyDir: { medium: Memory, sizeLimit: 512Mi }

@@ -1,0 +1,10 @@
+# Non-secret settings shared by the API and the ML job.
+# The database password lives in the "coe-db" Secret, created by deploy.sh
+# (never committed to Git).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coe-config
+data:
+  WAIT_THRESHOLD: "0.08"      # "wait" when the median is >= 8% below today's premium
+  COE_WORKERS: "2"            # worker processes for the ML pipeline (shared VM: keep small)

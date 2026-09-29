@@ -1,0 +1,169 @@
+"""All SQL used by the API, in one place.
+
+Functions take an open connection and return plain dicts / lists so routers
+stay thin and the queries can be read (and tested) on their own.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+
+from sqlalchemy import text
+from sqlalchemy.engine import Connection
+
+
+def _all(conn: Connection, sql: str, **params) -> list[dict]:
+    return [dict(r) for r in conn.execute(text(sql), params).mappings()]
+
+
+def _one(conn: Connection, sql: str, **params) -> dict | None:
+    row = conn.execute(text(sql), params).mappings().first()
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Market data
+# ---------------------------------------------------------------------------
+def latest_run(conn: Connection) -> dict | None:
+    return _one(conn, """
+        SELECT id, created_at, finished_at, model_name, data_through, last_bidding,
+               params, metrics, duration_s
+        FROM model_runs WHERE status = 'succeeded' ORDER BY id DESC LIMIT 1""")
+
+
+def latest_evaluated_run(conn: Connection) -> dict | None:
+    """Latest successful run that includes a backtest (quick retrains skip it)."""
+    return _one(conn, """
+        SELECT r.id, r.created_at, r.finished_at, r.model_name, r.data_through, r.last_bidding,
+               r.params, r.metrics, r.duration_s
+        FROM model_runs r
+        WHERE r.status = 'succeeded' AND EXISTS (SELECT 1 FROM backtest_metrics b WHERE b.run_id = r.id)
+        ORDER BY r.id DESC LIMIT 1""")
+
+
+def recent_runs(conn: Connection, limit: int = 10) -> list[dict]:
+    return _all(conn, """
+        SELECT id, created_at, finished_at, status, model_name, data_through, last_bidding,
+               duration_s, host, notes
+        FROM model_runs ORDER BY id DESC LIMIT :limit""", limit=limit)
+
+
+def history(conn: Connection, category: str, since: date | None = None) -> list[dict]:
+    return _all(conn, """
+        SELECT month, bidding_no, premium, quota, bids_received, bids_success
+        FROM coe_results
+        WHERE category = :cat AND (CAST(:since AS DATE) IS NULL OR month >= :since)
+        ORDER BY month, bidding_no""", cat=category, since=since)
+
+
+def latest_exercises(conn: Connection, n: int = 25) -> list[dict]:
+    """The last ``n`` exercises for every category (newest first per category)."""
+    return _all(conn, """
+        SELECT * FROM (
+            SELECT category, month, bidding_no, premium, quota, bids_received, bids_success,
+                   ROW_NUMBER() OVER (PARTITION BY category ORDER BY month DESC, bidding_no DESC) AS rn
+            FROM coe_results) t
+        WHERE rn <= :n ORDER BY category, rn""", n=n)
+
+
+def premium_year_ago(conn: Connection, category: str, month: date, bidding_no: int) -> int | None:
+    row = _one(conn, """
+        SELECT premium FROM coe_results
+        WHERE category = :cat AND month = (CAST(:month AS DATE) - INTERVAL '1 year') AND bidding_no = :b""",
+               cat=category, month=month, b=bidding_no)
+    return row["premium"] if row else None
+
+
+def macro(conn: Connection, since: date) -> list[dict]:
+    return _all(conn, """
+        SELECT month, indicator, value FROM macro_indicators
+        WHERE month >= :since ORDER BY indicator, month""", since=since)
+
+
+# ---------------------------------------------------------------------------
+# Forecasts
+# ---------------------------------------------------------------------------
+def forecast(conn: Connection, run_id: int, category: str, scenario: str) -> list[dict]:
+    return _all(conn, """
+        SELECT step, month, bidding_no, quota, q05, q10, q25, q50, q75, q90, q95
+        FROM forecasts WHERE run_id = :run AND category = :cat AND scenario = :sc
+        ORDER BY step""", run=run_id, cat=category, sc=scenario)
+
+
+def forecasts_all(conn: Connection, run_id: int, scenario: str = "base") -> list[dict]:
+    return _all(conn, """
+        SELECT category, step, month, bidding_no, quota, q05, q10, q25, q50, q75, q90, q95
+        FROM forecasts WHERE run_id = :run AND scenario = :sc ORDER BY category, step""",
+                run=run_id, sc=scenario)
+
+
+# ---------------------------------------------------------------------------
+# Policy
+# ---------------------------------------------------------------------------
+def policy_events(conn: Connection) -> list[dict]:
+    return _all(conn, "SELECT * FROM policy_events ORDER BY effective_month")
+
+
+def intervention_effects(conn: Connection, run_id: int) -> list[dict]:
+    return _all(conn, """
+        SELECT event_code, category, omega, std_err, p_value, pct_effect, pct_low, pct_high
+        FROM intervention_effects WHERE run_id = :run ORDER BY event_code, category""", run=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Model diagnostics
+# ---------------------------------------------------------------------------
+def backtest_metrics(conn: Connection, run_id: int) -> list[dict]:
+    return _all(conn, "SELECT * FROM backtest_metrics WHERE run_id = :run", run=run_id)
+
+
+def backtest_predictions(conn: Connection, run_id: int, category: str, model: str, horizon: int) -> list[dict]:
+    return _all(conn, """
+        SELECT month, bidding_no, horizon, actual, q10, q50, q90
+        FROM backtest_predictions
+        WHERE run_id = :run AND category = :cat AND model = :model AND horizon = :h
+        ORDER BY month, bidding_no""", run=run_id, cat=category, model=model, h=horizon)
+
+
+def variable_importance(conn: Connection, run_id: int) -> list[dict]:
+    return _all(conn, """
+        SELECT component, variable, importance FROM variable_importance
+        WHERE run_id = :run ORDER BY component, importance DESC""", run=run_id)
+
+
+def attention(conn: Connection, run_id: int) -> list[dict]:
+    return _all(conn, """
+        SELECT category, lag, weight FROM attention_weights
+        WHERE run_id = :run ORDER BY category, lag""", run=run_id)
+
+
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+def list_alerts(conn: Connection, client_id: str) -> list[dict]:
+    return _all(conn, """
+        SELECT id, category, direction, target, label, created_at
+        FROM price_alerts WHERE client_id = :cid ORDER BY created_at DESC""", cid=client_id)
+
+
+def count_alerts(conn: Connection, client_id: str) -> int:
+    return conn.execute(text("SELECT COUNT(*) FROM price_alerts WHERE client_id = :cid"),
+                        {"cid": client_id}).scalar_one()
+
+
+def create_alert(conn: Connection, client_id: str, category: str, direction: str,
+                 target: int, label: str | None) -> dict:
+    row = _one(conn, """
+        INSERT INTO price_alerts (client_id, category, direction, target, label)
+        VALUES (:cid, :cat, :dir, :target, :label)
+        RETURNING id, category, direction, target, label, created_at""",
+               cid=client_id, cat=category, dir=direction, target=target, label=label)
+    conn.commit()
+    return row
+
+
+def delete_alert(conn: Connection, alert_id: int, client_id: str) -> bool:
+    deleted = conn.execute(text("DELETE FROM price_alerts WHERE id = :id AND client_id = :cid"),
+                           {"id": alert_id, "cid": client_id}).rowcount
+    conn.commit()
+    return deleted > 0

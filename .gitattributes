@@ -1,0 +1,8 @@
+# Scripts and container files run on Linux: always check them out with LF endings,
+# even on Windows machines with core.autocrlf enabled.
+*.sh        text eol=lf
+*.sql       text eol=lf
+*.yaml      text eol=lf
+*.template  text eol=lf
+Dockerfile  text eol=lf
+*.py        text eol=lf

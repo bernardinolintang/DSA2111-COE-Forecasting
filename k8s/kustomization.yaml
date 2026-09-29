@@ -1,0 +1,31 @@
+# Apply everything with:  microk8s kubectl apply -k k8s/
+# (scripts/ronin/deploy.sh does this for you, after building and pushing the images)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Unique per group, because the Ronin VM (and its microk8s) is shared by the class.
+namespace: coe-g7
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - api.yaml
+  - web.yaml
+  - ml.yaml
+
+# Images are pushed to microk8s' built-in registry (Week 5 lab).
+images:
+  - name: coe-api
+    newName: localhost:32000/coe-api
+    newTag: v1
+  - name: coe-web
+    newName: localhost:32000/coe-web
+    newTag: v1
+  - name: coe-ml
+    newName: localhost:32000/coe-ml
+    newTag: v1
+
+labels:
+  - pairs:
+      project: coe-forecast

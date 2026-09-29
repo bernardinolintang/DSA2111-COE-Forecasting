@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local configuration and data
+.env
+backups/
+ml/data/artifacts/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,11 @@
+# PyTorch is installed separately from the CPU-only wheel index (see Dockerfile)
+# to keep the image ~1.5 GB smaller than the default CUDA build.
+numpy==2.1.3
+pandas==2.2.3
+scipy==1.14.1
+scikit-learn==1.5.2
+statsmodels==0.14.4
+requests==2.32.3
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+pytest==8.3.4

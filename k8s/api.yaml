@@ -1,0 +1,70 @@
+# FastAPI service. Two replicas behind a ClusterIP Service: if a pod dies the
+# Deployment replaces it (self-healing) and the other keeps serving traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coe-api
+  labels: { app: coe-api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: coe-api }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }    # zero-downtime upgrades
+  template:
+    metadata:
+      labels: { app: coe-api }
+    spec:
+      containers:
+        - name: api
+          image: coe-api            # rewritten to the registry image by kustomization.yaml
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: coe-db, key: password }
+            - name: DATABASE_URL
+              value: postgresql+psycopg://coe:$(POSTGRES_PASSWORD)@coe-db:5432/coe
+          envFrom:
+            - configMapRef: { name: coe-config }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8000 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coe-api
+spec:
+  selector: { app: coe-api }
+  ports:
+    - port: 8000
+      targetPort: 8000
+---
+# Scale the API between 2 and 5 pods on CPU load (needs `microk8s enable metrics-server`).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: coe-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: coe-api
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

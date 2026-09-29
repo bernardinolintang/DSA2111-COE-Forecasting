@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>COE Forecast</title>
+  <meta name="description" content="Policy-aware probabilistic forecasts of Singapore COE premiums: buy-or-wait signals, a bid planner and price alerts.">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/styles.css">
+  <script>
+    // Apply a saved theme before first paint to avoid a flash.
+    try { const t = JSON.parse(localStorage.getItem("coe-theme")); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="visually-hidden" href="#app">Skip to content</a>
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#/" aria-label="COE Forecast home">
+        <img class="brand-mark" src="assets/icon.svg" alt="" width="24" height="24"><span>COE Forecast</span>
+      </a>
+      <nav aria-label="Main">
+        <ul class="nav-links">
+          <li><a href="#/" data-nav="overview">Overview</a></li>
+          <li><a href="#/forecast/A" data-nav="forecast">Forecast</a></li>
+          <li><a href="#/bid/A" data-nav="bid">Bid planner</a></li>
+          <li><a href="#/policy" data-nav="policy">Policy Lab</a></li>
+          <li><a href="#/model" data-nav="model">Model</a></li>
+          <li><a href="#/alerts" data-nav="alerts">Alerts</a></li>
+        </ul>
+      </nav>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode"></button>
+    </div>
+  </header>
+
+  <main id="app" tabindex="-1"></main>
+
+  <footer class="footer">
+    <div class="container">
+      <div>COE bidding results: Land Transport Authority via data.gov.sg (Singapore Open Data Licence). CPI, SORA and GDP: Department of Statistics Singapore.</div>
+      <div>Forecasts are probabilistic estimates for education and research, not financial advice. DSA2111 Group 7 · National University of Singapore.</div>
+      <div><a href="/api/docs" target="_blank" rel="noopener">API documentation</a></div>
+    </div>
+  </footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

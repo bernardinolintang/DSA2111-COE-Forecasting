@@ -1,0 +1,72 @@
+# Local / single-VM deployment of the whole stack.
+#
+#   docker compose up --build        # db + ml (runs once) + api + web
+#   open http://localhost:8080
+#
+#   docker compose run --rm ml run --skip-backtest   # quick retrain after a new bidding exercise
+#   docker compose run --rm api pytest -q tests      # API tests against the live database
+name: coe-forecast
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-coe}:${POSTGRES_PASSWORD:-coe_password}@db:5432/${POSTGRES_DB:-coe}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-coe}
+      POSTGRES_USER: ${POSTGRES_USER:-coe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coe_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Batch job: ingest -> backtest -> train -> forecast -> write to Postgres, then exit.
+  ml:
+    build:
+      context: .
+      dockerfile: ml/Dockerfile
+    image: coe-ml:latest
+    environment:
+      <<: *database-url
+      DATAGOV_API_KEY: ${DATAGOV_API_KEY:-}
+      COE_WORKERS: ${COE_WORKERS:-4}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: coe-api:latest
+    environment:
+      <<: *database-url
+      WAIT_THRESHOLD: ${WAIT_THRESHOLD:-0.08}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: coe-web:latest
+    environment:
+      API_UPSTREAM: api:8000
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
