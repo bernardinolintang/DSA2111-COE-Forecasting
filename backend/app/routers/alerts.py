@@ -1,9 +1,13 @@
-"""Price alerts: the only data users write.
+"""Price watchlist ("alerts"): the only data users write.
 
 Alerts are keyed by an anonymous ``client_id`` (a UUID created in the browser),
 so no login or personal data is needed. Each alert is scored against the
 latest forecast: how likely is the premium to cross the target within the
 forecast horizon?
+
+Nothing is pushed to the user: there is no email, SMS or push channel. The
+web app shows the scored list, and flags status changes the next time the
+viewer opens the site, which is why the UI calls this a watchlist.
 """
 
 from __future__ import annotations
@@ -43,9 +47,14 @@ def list_alerts(client_id: UUID, conn: Connection = Depends(get_connection)):
 
 @router.post("", response_model=Alert, status_code=status.HTTP_201_CREATED)
 def create_alert(alert: AlertIn, conn: Connection = Depends(get_connection)):
-    if repo.count_alerts(conn, str(alert.client_id)) >= settings.max_alerts_per_client:
-        raise HTTPException(status_code=429, detail="Alert limit reached. Delete an alert first.")
-    row = repo.create_alert(conn, str(alert.client_id), alert.category, alert.direction, alert.target, alert.label)
+    cid = str(alert.client_id)
+    if repo.find_alert(conn, cid, alert.category, alert.direction, alert.target):
+        raise HTTPException(status_code=409, detail=f"You're already watching Cat {alert.category} "
+                                                    f"{alert.direction} ${alert.target:,}.")
+    if repo.count_alerts(conn, cid) >= settings.max_alerts_per_client:
+        raise HTTPException(status_code=429, detail="Watchlist limit reached. Remove a target first.")
+    label = (alert.label or "").strip() or None
+    row = repo.create_alert(conn, cid, alert.category, alert.direction, alert.target, label)
     return _score(conn, [row])[0]
 
 

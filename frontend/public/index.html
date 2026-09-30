@@ -31,10 +31,20 @@
           <li><a href="#/bid/A" data-nav="bid">Bid planner</a></li>
           <li><a href="#/policy" data-nav="policy">Policy Lab</a></li>
           <li><a href="#/model" data-nav="model">Model</a></li>
-          <li><a href="#/alerts" data-nav="alerts">Alerts</a></li>
+          <li><a href="#/alerts" data-nav="alerts">Watchlist</a></li>
         </ul>
       </nav>
-      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode"></button>
+      <div class="nav-tools">
+        <div class="help-wrap">
+          <button class="icon-btn" id="help-toggle" type="button" aria-label="Help" aria-haspopup="menu" aria-expanded="false" aria-controls="help-menu"></button>
+          <div class="help-menu" id="help-menu" role="menu" aria-label="Help" hidden>
+            <button type="button" role="menuitem" data-help="tour"><strong>Take the 2-minute tour</strong><span>What each page shows</span></button>
+            <button type="button" role="menuitem" data-help="analyst"><strong>Ask the COE Analyst</strong><span>Questions about what you're viewing</span></button>
+            <button type="button" role="menuitem" data-help="glossary"><strong>What the terms mean</strong><span>Median, 80% range, n.s., sMAPE…</span></button>
+          </div>
+        </div>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode"></button>
+      </div>
     </div>
   </header>
 

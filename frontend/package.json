@@ -1,0 +1,14 @@
+{
+  "name": "coe-forecast-web",
+  "private": true,
+  "description": "Dev/test tooling only. The app itself is dependency-free static files in public/.",
+  "type": "module",
+  "scripts": {
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "playwright test",
+    "test": "node --test \"tests/unit/*.test.js\" && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

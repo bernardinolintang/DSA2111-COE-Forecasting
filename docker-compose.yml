@@ -50,6 +50,12 @@ services:
     environment:
       <<: *database-url
       WAIT_THRESHOLD: ${WAIT_THRESHOLD:-0.08}
+      # COE Analyst: put GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env; without a key it runs in basic mode.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANALYST_PROVIDER: ${ANALYST_PROVIDER:-}
+      ANALYST_MODEL: ${ANALYST_MODEL:-}
+      ANALYST_EFFORT: ${ANALYST_EFFORT:-}
     depends_on:
       db:
         condition: service_healthy

@@ -1,6 +1,8 @@
 // Small helpers shared by every page: safe HTML templating, number formatting,
 // dates, and per-viewer storage.
 
+import { attachThumb } from "./motion.js";
+
 // ---------------------------------------------------------------------------
 // Safe HTML: every interpolated value is escaped unless wrapped in raw().
 // ---------------------------------------------------------------------------
@@ -36,12 +38,13 @@ export function mount(el, template) {
 const nf0 = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
-export const money = (v) => (v == null || Number.isNaN(v) ? "—" : `$${nf0.format(Math.round(v))}`);
-export const number = (v) => (v == null ? "—" : nf0.format(v));
+const bad = (v) => v == null || typeof v !== "number" || !Number.isFinite(v);
+export const money = (v) => (bad(v) ? "—" : `$${nf0.format(Math.round(v))}`);
+export const number = (v) => (bad(v) ? "—" : nf0.format(v));
 
 /** $131.9k style, for axes and tight spaces. */
 export function moneyShort(v) {
-  if (v == null) return "—";
+  if (bad(v)) return "—";
   const a = Math.abs(v);
   if (a >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
   if (a >= 1e4) return `$${Math.round(v / 1e3)}k`;
@@ -50,10 +53,32 @@ export function moneyShort(v) {
 }
 
 export function pct(v, { sign = true, digits = 1 } = {}) {
-  if (v == null || Number.isNaN(v)) return "—";
+  if (bad(v)) return "—";
   const s = digits === 1 ? nf1.format(Math.abs(v)) : nf0.format(Math.abs(v));
   const prefix = !sign ? (v < 0 ? "−" : "") : v > 0 ? "+" : v < 0 ? "−" : "";
   return `${prefix}${s}%`;
+}
+
+/**
+ * Parse a dollar amount typed or pasted by a person: "100000", "100,000",
+ * "$100,000", "$ 95,000.00" and "95k" are all accepted. Anything else
+ * (letters, negatives, zero, blanks) is rejected with a message to show.
+ * Returns { ok: true, value } or { ok: false, error, empty }.
+ */
+export function parseMoney(input, { min = 1, max = 999_999, what = "a COE premium" } = {}) {
+  const s = String(input ?? "").trim().replace(/^S\$/i, "$");
+  const range = `between ${money(min)} and ${money(max)}`;
+  if (!s) return { ok: false, empty: true, error: `Enter ${what} ${range}.` };
+  if (/^-\s*\$?\s*\d/.test(s)) return { ok: false, error: `Enter ${what} above $0.` };
+  const m = s.match(/^\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?\s*(k)?$/i);
+  if (!m) return { ok: false, error: `Enter ${what} using numbers only, e.g. 95,000.` };
+  let value = Number(m[1].replace(/,/g, "") + (m[2] || ""));
+  if (m[3]) value *= 1000;
+  value = Math.round(value);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    return { ok: false, error: `Enter ${what} ${range}.` };
+  }
+  return { ok: true, value };
 }
 
 // ---------------------------------------------------------------------------
@@ -119,13 +144,22 @@ export const ICONS = {
   moon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`,
   trash: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`,
   bell: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>`,
+  help: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17.2h.01"/></svg>`,
+  sparkle: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>`,
+  close: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
+  send: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>`,
 };
 
+export const CONVICTION = { high: "High conviction", medium: "Medium conviction", low: "Low conviction" };
+
+/** The signal worded by conviction: a weak call is visibly weaker than a strong one. */
 export function signalPill(signal) {
   if (!signal) return html`<span class="pill pill-neutral">No forecast</span>`;
-  return signal.action === "wait"
-    ? html`<span class="pill pill-wait">${raw(ICONS.clock)}Wait</span>`
-    : html`<span class="pill pill-buy">${raw(ICONS.check)}Buy now</span>`;
+  const wait = signal.action === "wait";
+  const strong = signal.conviction === "high";
+  const label = signal.label || (wait ? "Wait" : "Buy now");
+  const cls = `pill ${wait ? "pill-wait" : "pill-buy"}${strong ? "" : " pill-soft"}`;
+  return html`<span class="${cls}" title="${CONVICTION[signal.conviction] || ""}">${raw(wait ? ICONS.clock : ICONS.check)}${label}</span>`;
 }
 
 export function segmented(name, options, active, label) {
@@ -134,10 +168,15 @@ export function segmented(name, options, active, label) {
   </div>`;
 }
 
-/** Wire a segmented control rendered by segmented(); calls onChange(value). */
+/**
+ * Wire a segmented control rendered by segmented(); calls onChange(value).
+ * The selection is drawn by a thumb that slides to whichever button is pressed,
+ * however it was pressed (click, a page action, the analyst).
+ */
 export function onSegment(root, name, onChange) {
   const group = root.querySelector(`[data-seg="${name}"]`);
   if (!group) return;
+  attachThumb(group);
   group.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-value]");
     if (!btn) return;

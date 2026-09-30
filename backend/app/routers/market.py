@@ -62,9 +62,11 @@ def summary(conn: Connection = Depends(get_connection)):
             card.update(
                 next_q50=steps[0]["q50"], horizon_q10=advice.horizon_q10, horizon_q50=advice.horizon_q50,
                 horizon_q90=advice.horizon_q90, horizon_label=advice.horizon_label,
-                signal={"action": advice.action, "headline": advice.headline,
+                signal={"action": advice.action, "headline": advice.headline, "label": advice.label,
+                        "conviction": advice.conviction,
                         "expected_change_pct": advice.expected_change_pct,
-                        "prob_lower_pct": advice.prob_lower_pct},
+                        "prob_lower_pct": advice.prob_lower_pct, "prob_higher_pct": advice.prob_higher_pct,
+                        "prob_save_pct": advice.prob_save_pct},
             )
         cards.append(card)
     return {"run": run, "data_through": data_through, "categories": cards}

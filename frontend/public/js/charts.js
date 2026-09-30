@@ -7,7 +7,16 @@
 //  * columns ≤ 24px wide with 4px rounded data-ends, square at the baseline
 //  * text always uses ink tokens, never the series colour
 // Every chart re-renders on resize (ResizeObserver) and is keyboard navigable.
+//
+// Rendering contract: a chart draws synchronously when it is created (so there is
+// never a painted frame with an empty SVG), redraws in place through update()
+// when its data changes (never destroy + recreate), and redraws on resize only
+// when the width actually changed. If the container has no width yet (hidden
+// tab, closed <details>), the first ResizeObserver callback draws it.
+// update(next, { animate: true }) morphs from the current picture to the new one
+// (see "Morphing" below); setPoints() moves highlighted points without a redraw.
 
+import { DURATION, lerp, reducedMotion, tween } from "./motion.js";
 import { esc } from "./util.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -104,121 +113,297 @@ function makeTooltip(container) {
 
 function observe(container, draw) {
   let frame;
-  const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(draw); });
+  const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => draw()); });
   ro.observe(container);
-  return () => ro.disconnect();
+  return () => { cancelAnimationFrame(frame); ro.disconnect(); };
 }
+
+function emptyState(svg, W, H, text) {
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="empty-label">${esc(text)}</text>`;
+}
+
+// ---------------------------------------------------------------------------
+// Morphing: a chart's state is a "frame" in data units (domains, ticks, series
+// points). A change interpolates the frame on screen towards the new one, so a
+// new scenario visibly moves the forecast instead of drawing a new graph.
+// Series are matched by key; points by x (resampled when the x grids differ,
+// e.g. a longer history window or another category's bid grid). Ticks,
+// markers and regions that only exist on one side fade in or out.
+// ---------------------------------------------------------------------------
+let clipIds = 0;
+
+/** Values of a sorted [[x, ...values]] list at x (linear between points), or null outside it. */
+export function sample(pts, x) {
+  const n = pts.length;
+  if (!n || x < pts[0][0] || x > pts[n - 1][0]) return null;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] <= x) lo = mid; else hi = mid;
+  }
+  const a = pts[lo];
+  const b = pts[hi];
+  if (a[0] === x) return a.slice(1);
+  if (b[0] === x) return b.slice(1);
+  const k = (x - a[0]) / (b[0] - a[0]);
+  return a.slice(1).map((v, i) => v + (b[i + 1] - v) * k);
+}
+
+function mergeSorted(a, b) {
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    const v = j >= b.length || (i < a.length && a[i] <= b[j]) ? a[i++] : b[j++];
+    if (out[out.length - 1] !== v) out.push(v);
+  }
+  return out;
+}
+
+/** Points of two series part-way (t) between them; exported for tests. */
+export function mixPts(pa, pb, t) {
+  if (t >= 1) return pb;
+  if (t <= 0) return pa;
+  if (pa.length === pb.length && pa.every((p, i) => p[0] === pb[i][0])) {
+    return pb.map((p, i) => p.map((v, j) => (j === 0 ? v : lerp(pa[i][j], v, t))));
+  }
+  // Different x grids: draw the union; a point only one side has keeps its own value.
+  return mergeSorted(pa.map((p) => p[0]), pb.map((p) => p[0])).map((x) => {
+    const va = sample(pa, x);
+    const vb = sample(pb, x);
+    const a = va ?? vb;
+    const b = vb ?? va;
+    return [x, ...a.map((v, k) => lerp(v, b[k], t))];
+  });
+}
+
+/** Items in both lists blend; items on one side fade out (A) or in (B). */
+function fadeUnion(listA, listB, key, t, merge) {
+  const byKey = new Map(listA.map((a) => [key(a), a]));
+  const seen = new Set();
+  const out = listB.map((b) => {
+    const k = key(b);
+    seen.add(k);
+    const a = byKey.get(k);
+    return a ? { ...merge(a, b), a: lerp(a.a, b.a, t) } : { ...b, a: b.a * t };
+  });
+  for (const a of listA) if (!seen.has(key(a))) out.push({ ...a, a: a.a * (1 - t) });
+  return out;
+}
+
+function mixFrames(A, B, t) {
+  const same = (a, b) => b;
+  return {
+    x0: lerp(A.x0, B.x0, t), x1: lerp(A.x1, B.x1, t),
+    yMin: lerp(A.yMin, B.yMin, t), yMax: lerp(A.yMax, B.yMax, t),
+    yTicks: fadeUnion(A.yTicks, B.yTicks, (k) => k.v, t, same),
+    series: fadeUnion(A.series, B.series, (s) => s.key, t, (a, b) => ({ ...b, pts: mixPts(a.pts, b.pts, t) })),
+    bands: fadeUnion(A.bands, B.bands, (s) => s.key, t, (a, b) => ({ ...b, pts: mixPts(a.pts, b.pts, t) })),
+    points: A.points.length === B.points.length
+      ? B.points.map((p, i) => ({ ...p, x: lerp(A.points[i].x, p.x, t), y: lerp(A.points[i].y, p.y, t) }))
+      : B.points,
+    now: A.now != null && B.now != null ? lerp(A.now, B.now, t) : B.now,
+    nowLabel: B.nowLabel,
+    markers: fadeUnion(A.markers, B.markers, (mk) => `${mk.x}|${mk.label}`, t, same),
+    regions: fadeUnion(A.regions, B.regions, (r) => `${r.x0}|${r.x1}`, t, same),
+  };
+}
+
+const opacityAttr = (a) => (a < 0.995 ? ` opacity="${Math.max(0, a).toFixed(3)}"` : "");
 
 // ---------------------------------------------------------------------------
 // Time / line chart with optional bands, markers and a crosshair
 // ---------------------------------------------------------------------------
 /**
  * opts:
- *  series:  [{ key, label, color, points: [{x, y}], width? }]
+ *  series:  [{ key, label, color, points: [{x, y}], width?, endDot? }]
  *  bands:   [{ key, color, opacity, points: [{x, lo, hi}] }]
- *  markers: [{ x, label }]            vertical hairlines (e.g. policy events)
+ *  markers: [{ x, label, active? }]   vertical hairlines (e.g. policy events)
+ *  regions: [{ x0, x1 }]              shaded x-ranges (e.g. a selected policy period)
+ *  points:  [{ x, y, color, r?, guides? }]  highlighted points (guides: lines to both axes)
  *  now:     x                         a "today" divider
  *  xType:   "time" (x = Date) | "linear"
  *  yFormat, xFormat(x) for ticks/tooltip; tooltip(x) -> {title, rows}
  *  height, yZero (include 0), label (aria)
+ *  zoom:    true to allow zooming the x-axis (Ctrl/⌘ + wheel or pinch, drag to pan,
+ *           double-click or "Reset zoom" to go back); the y-axis fits what is in view
+ *  focus:   { x0, x1, label } an x-range offered as a one-click zoom (e.g. the forecast)
+ *
+ * Returns { update(next, { animate, resetZoom }), setPoints(points), destroy() }.
  */
 export function lineChart(container, opts) {
-  const o = { height: 320, xType: "time", yFormat: String, xFormat: String, series: [], bands: [],
-              markers: [], label: "Chart", ...opts };
+  let o;
   container.classList.add("chart");
   container.replaceChildren();
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", o.label);
   svg.setAttribute("tabindex", "0");
   container.appendChild(svg);
   const tip = makeTooltip(container);
+  const clipId = `chart-clip-${++clipIds}`;
 
   const toNum = (x) => (o.xType === "time" ? +x : x);
-  const xsAll = [...new Set([
-    ...o.series.flatMap((s) => s.points.map((p) => toNum(p.x))),
-    ...o.bands.flatMap((b) => b.points.map((p) => toNum(p.x))),
-  ])].sort((a, b) => a - b);
-  const lookup = o.series.map((s) => new Map(s.points.map((p) => [toNum(p.x), p.y])));
+  let xsAll = [];
+  let lookup = [];
   let geometry = null;
   let active = -1;
+  let drawnW = 0;
+  let shown = null;            // the frame currently on screen
+  let anim = null;             // { from, to, t, handle } while morphing
+  let view = null;             // zoomed-in x-range [x0, x1] (data units), or null for everything
+  let zoomBar = null;
 
-  function draw() {
-    const W = container.clientWidth;
-    if (!W || !xsAll.length) return;
-    const H = o.height;
+  function configure(next) {
+    o = { height: 320, xType: "time", yFormat: String, xFormat: String, series: [], bands: [],
+          markers: [], regions: [], points: [], label: "Chart", emptyText: "No data to show", ...next };
+    svg.setAttribute("aria-label", o.label);
+    xsAll = [...new Set([
+      ...o.series.flatMap((s) => s.points.map((p) => toNum(p.x))),
+      ...o.bands.flatMap((b) => b.points.map((p) => toNum(p.x))),
+    ])].filter(Number.isFinite).sort((a, b) => a - b);
+    lookup = o.series.map((s) => new Map(s.points.map((p) => [toNum(p.x), p.y])));
+    if (active >= xsAll.length) active = -1;
+  }
+
+  const framePoints = (points) => (points || []).map((p) => ({
+    x: toNum(p.x), y: p.y, color: p.color, r: p.r || 6, guides: Boolean(p.guides),
+  }));
+
+  /** The target frame for the current options at width W. */
+  function targetFrame(W) {
     const compact = W < 520;
-    const m = { top: o.markers.length && !compact ? 40 : 12, right: 12, bottom: 28, left: compact ? 46 : 58 };
-    const yVals = [
-      ...o.series.flatMap((s) => s.points.map((p) => p.y)),
-      ...o.bands.flatMap((b) => b.points.flatMap((p) => [p.lo, p.hi])),
-    ].filter((v) => v != null && Number.isFinite(v));
+    const [vx0, vx1] = view ?? [xsAll[0], xsAll[xsAll.length - 1]];
+    const series = o.series.map((s) => ({
+      key: s.key, color: s.color, width: s.width || 2, endDot: s.endDot, a: 1,
+      pts: s.points.filter((p) => p.y != null && Number.isFinite(p.y)).map((p) => [toNum(p.x), p.y]),
+    }));
+    const bands = o.bands.map((b) => ({
+      key: b.key, color: b.color, opacity: b.opacity ?? 0.14, a: 1,
+      pts: b.points.filter((p) => p.lo != null && p.hi != null).map((p) => [toNum(p.x), p.lo, p.hi]),
+    }));
+    // The y-axis fits what is in view, so zooming in shows real detail.
+    const inView = (pts) => {
+      if (!view) return pts.flatMap((p) => p.slice(1));
+      const vals = pts.filter((p) => p[0] >= vx0 && p[0] <= vx1).flatMap((p) => p.slice(1));
+      for (const edge of [sample(pts, vx0), sample(pts, vx1)]) if (edge) vals.push(...edge);
+      return vals;
+    };
+    let yVals = [...series, ...bands].flatMap((s) => inView(s.pts)).filter(Number.isFinite);
+    if (!yVals.length) yVals = [...series, ...bands].flatMap((s) => s.pts.flatMap((p) => p.slice(1))).filter(Number.isFinite);
     let yMin = Math.min(...yVals);
-    let yMax = Math.max(...yVals);
+    const yMax = Math.max(...yVals);
     if (o.yZero) yMin = Math.min(0, yMin);
     const pad = (yMax - yMin) * 0.06 || 1;
     const nice = o.yDomain                       // fixed domain, e.g. [0, 100] for probabilities
       ? niceTicks(o.yDomain[0], o.yDomain[1], compact ? 4 : 5)
       : niceTicks(o.yZero ? yMin : yMin - pad, yMax + pad, compact ? 4 : 5);
-    const x = linear(xsAll[0], xsAll[xsAll.length - 1], m.left, W - m.right);
-    const y = linear(nice.min, nice.max, H - m.bottom, m.top);
+    return {
+      x0: vx0, x1: vx1, yMin: nice.min, yMax: nice.max,
+      yTicks: nice.ticks.map((v) => ({ v, a: 1 })),
+      series,
+      bands,
+      points: framePoints(o.points),
+      now: o.now != null ? toNum(o.now) : null,
+      nowLabel: o.nowLabel || "Now",
+      markers: o.markers.map((mk) => ({ x: toNum(mk.x), label: mk.label, active: Boolean(mk.active), a: 1 })),
+      regions: o.regions.map((r) => ({ x0: toNum(r.x0), x1: toNum(r.x1), a: 1 })),
+    };
+  }
+
+  function pointsMarkup(points, { x, y, m, H }) {
+    return points.map((p, i) => {
+      const px = x(p.x).toFixed(1);
+      const py = y(p.y).toFixed(1);
+      const guides = p.guides
+        ? `<line class="guide" x1="${m.left}" x2="${px}" y1="${py}" y2="${py}"/><line class="guide" x1="${px}" x2="${px}" y1="${py}" y2="${H - m.bottom}"/>`
+        : "";
+      return `${guides}<circle data-i="${i}" cx="${px}" cy="${py}" r="${p.r}" fill="${p.color}" class="hover-dot"/>`;
+    }).join("");
+  }
+
+  /** Paint frame F at width W (one innerHTML write). */
+  function render(F, W) {
+    const H = o.height;
+    const compact = W < 520;
+    const m = { top: o.markers.length && !compact ? 40 : 12, right: 12, bottom: 28, left: compact ? 46 : 58 };
+    const x = linear(F.x0, F.x1, m.left, W - m.right);
+    const y = linear(F.yMin, F.yMax, H - m.bottom, m.top);
     geometry = { x, y, m, W, H };
 
-    const parts = [];
-    for (const t of nice.ticks) {
-      const yy = Math.round(y(t)) + 0.5;
-      parts.push(`<line class="gridline" x1="${m.left}" x2="${W - m.right}" y1="${yy}" y2="${yy}"/>`);
-      parts.push(`<text x="${m.left - 8}" y="${yy + 4}" text-anchor="end">${esc(o.yFormat(t))}</text>`);
+    const parts = [`<defs><clipPath id="${clipId}"><rect x="${m.left - 1}" y="0" width="${W - m.left + 1}" height="${H}"/></clipPath></defs>`];
+    for (const t of F.yTicks) {
+      if (t.a < 0.02) continue;
+      const yy = Math.round(y(t.v)) + 0.5;
+      if (yy < m.top - 1 || yy > H - m.bottom + 1) continue;
+      const op = opacityAttr(t.a);
+      parts.push(`<line class="gridline" x1="${m.left}" x2="${W - m.right}" y1="${yy}" y2="${yy}"${op}/>`);
+      parts.push(`<text x="${m.left - 8}" y="${yy + 4}" text-anchor="end"${op}>${esc(o.yFormat(t.v))}</text>`);
     }
     const xTicks = o.xType === "time"
-      ? timeTicks(xsAll[0], xsAll[xsAll.length - 1], compact ? 4 : 8)
-      : niceTicks(xsAll[0], xsAll[xsAll.length - 1], compact ? 4 : 6).ticks
-          .filter((v) => v >= xsAll[0] && v <= xsAll[xsAll.length - 1]).map((v) => ({ value: v, label: o.xFormat(v) }));
+      ? timeTicks(F.x0, F.x1, compact ? 4 : 8)
+      : niceTicks(F.x0, F.x1, compact ? 4 : 6).ticks
+          .filter((v) => v >= F.x0 && v <= F.x1).map((v) => ({ value: v, label: o.xFormat(v) }));
     for (const t of xTicks) {
       parts.push(`<text x="${x(t.value).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(t.label)}</text>`);
     }
     parts.push(`<line class="baseline" x1="${m.left}" x2="${W - m.right}" y1="${H - m.bottom + 0.5}" y2="${H - m.bottom + 0.5}"/>`);
 
-    for (const b of o.bands) {
-      const pts = b.points.filter((p) => p.lo != null && p.hi != null);
-      if (!pts.length) continue;
-      const upper = pts.map((p) => [x(toNum(p.x)), y(p.hi)]);
-      const lower = pts.map((p) => [x(toNum(p.x)), y(p.lo)]).reverse();
-      parts.push(`<path d="${path(upper)}${path(lower).replace("M", "L")}Z" fill="${b.color}" fill-opacity="${b.opacity ?? 0.14}"/>`);
+    parts.push(`<g clip-path="url(#${clipId})">`);
+    for (const r of F.regions) {
+      if (r.a < 0.02) continue;
+      const x0 = Math.max(m.left, x(r.x0));
+      const x1 = Math.min(W - m.right, x(r.x1));
+      if (x1 > x0) parts.push(`<rect class="region" x="${x0.toFixed(1)}" y="${m.top}" width="${(x1 - x0).toFixed(1)}" height="${H - m.top - m.bottom}"${opacityAttr(r.a)}/>`);
     }
-    if (o.now != null) {
-      const nx = Math.round(x(toNum(o.now))) + 0.5;
+    for (const b of F.bands) {
+      if (!b.pts.length || b.a < 0.02) continue;
+      const upper = b.pts.map((p) => [x(p[0]), y(p[2])]);
+      const lower = b.pts.map((p) => [x(p[0]), y(p[1])]).reverse();
+      parts.push(`<path d="${path(upper)}${path(lower).replace("M", "L")}Z" fill="${b.color}" fill-opacity="${(b.opacity * b.a).toFixed(3)}"/>`);
+    }
+    if (F.now != null) {
+      const nx = Math.round(x(F.now)) + 0.5;
       parts.push(`<line class="now-line" x1="${nx}" x2="${nx}" y1="${m.top}" y2="${H - m.bottom}"/>`);
-      parts.push(`<text x="${nx + 6}" y="${m.top + 11}" class="marker-label">${esc(o.nowLabel || "Now")}</text>`);
+      const fits = nx + 6 + String(F.nowLabel).length * 6.2 <= W - 2;
+      parts.push(`<text x="${fits ? nx + 6 : nx - 6}" y="${m.top + 11}" class="marker-label"${fits ? "" : ' text-anchor="end"'}>${esc(F.nowLabel)}</text>`);
     }
     // Marker labels go in two staggered rows; a label that would still collide is
     // left out (the marker line stays, and the full list is shown beside the chart).
+    // The active marker is labelled first so it is never the one left out.
     const rowEnds = [-Infinity, -Infinity];
-    for (const mk of o.markers) {
-      const mx = Math.round(x(toNum(mk.x))) + 0.5;
+    const ordered = [...F.markers].sort((a, b) => Number(b.active) - Number(a.active));
+    for (const mk of ordered) {
+      if (mk.a < 0.02) continue;
+      const mx = Math.round(x(mk.x)) + 0.5;
       if (mx < m.left || mx > W - m.right) continue;
       const labelW = String(mk.label).length * 6.2;
       const left = Math.min(Math.max(mx - labelW / 2, m.left), W - m.right - labelW);
-      const row = compact ? -1 : rowEnds.findIndex((end) => left > end + 8);
-      parts.push(`<line class="marker-line" x1="${mx}" x2="${mx}" y1="${row === 1 ? m.top - 18 : m.top - 4}" y2="${H - m.bottom}"/>`);
+      const row = compact && !mk.active ? -1 : rowEnds.findIndex((end) => left > end + 8);
+      const cls = mk.active ? " is-active" : "";
+      const op = opacityAttr(mk.a);
+      parts.push(`<line class="marker-line${cls}" x1="${mx}" x2="${mx}" y1="${row === 1 ? m.top - 18 : m.top - 4}" y2="${H - m.bottom}"${op}/>`);
       if (row >= 0) {
-        parts.push(`<text x="${left}" y="${m.top - 8 - row * 14}" class="marker-label">${esc(mk.label)}</text>`);
+        parts.push(`<text x="${left}" y="${m.top - 8 - row * 14}" class="marker-label${cls}"${op}>${esc(mk.label)}</text>`);
         rowEnds[row] = left + labelW;
       }
     }
-    for (const s of o.series) {
-      const pts = s.points.filter((p) => p.y != null).map((p) => [x(toNum(p.x)), y(p.y)]);
+    for (const s of F.series) {
+      if (s.a < 0.02) continue;
+      const pts = s.pts.map((p) => [x(p[0]), y(p[1])]);
+      const op = opacityAttr(s.a);
       if (pts.length > 1) {
-        parts.push(`<path class="series-line" d="${path(pts)}" stroke="${s.color}" stroke-width="${s.width || 2}"/>`);
+        parts.push(`<path class="series-line" d="${path(pts)}" stroke="${s.color}" stroke-width="${s.width}"${op}/>`);
       }
       if (s.endDot && pts.length) {
         const [ex, ey] = pts[pts.length - 1];
-        parts.push(`<circle cx="${ex}" cy="${ey}" r="4.5" fill="${s.color}" class="hover-dot"/>`);
+        parts.push(`<circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="4.5" fill="${s.color}" class="hover-dot"${op}/>`);
       }
     }
-    for (const p of o.points || []) {
-      parts.push(`<circle cx="${x(toNum(p.x))}" cy="${y(p.y)}" r="${p.r || 6}" fill="${p.color}" class="hover-dot"/>`);
-    }
+    parts.push(`<g class="pts">${pointsMarkup(F.points, geometry)}</g>`);
+    parts.push("</g>");
     parts.push(`<g class="hover" style="display:none"><line class="crosshair" y1="${m.top}" y2="${H - m.bottom}"/>${
       o.series.map((s) => `<circle r="4.5" fill="${s.color}" class="hover-dot"/>`).join("")}</g>`);
     parts.push(`<rect class="hit" x="${m.left}" y="0" width="${W - m.left - m.right}" height="${H}"/>`);
@@ -229,19 +414,54 @@ export function lineChart(container, opts) {
     if (active >= 0) highlight(active);
   }
 
+  function stopMorph() {
+    anim?.handle.cancel();
+    anim = null;
+  }
+
+  /** The frame on screen now, including a morph in progress. */
+  const currentFrame = () => (anim ? mixFrames(anim.from, anim.to, anim.t) : shown);
+
+  /** Morph from `from` to the target frame (instantly without a `from`, duration or motion). */
+  function morphFrom(from, duration) {
+    const W = container.clientWidth;
+    stopMorph();
+    if (!from || !duration || !W || W !== drawnW || !xsAll.length || reducedMotion()) { draw(true); return; }
+    const state = { from, to: targetFrame(W), t: 0 };
+    anim = state;
+    state.handle = tween({
+      duration,
+      onUpdate: (t) => { state.t = t; shown = mixFrames(state.from, state.to, t); render(shown, W); },
+      onDone: () => { if (anim === state) anim = null; shown = state.to; render(shown, W); },
+    });
+  }
+
+  function draw(force = false) {
+    const W = container.clientWidth;
+    if (!W || (!force && W === drawnW)) return;
+    const resized = W !== drawnW;
+    drawnW = W;
+    if (!xsAll.length) { stopMorph(); shown = null; geometry = null; emptyState(svg, W, o.height, o.emptyText); return; }
+    if (anim && !resized) return;               // the running morph paints every frame
+    stopMorph();                                // a resize mid-morph jumps to the end state
+    shown = targetFrame(W);
+    render(shown, W);
+  }
+
   function highlight(i) {
     if (!geometry || i < 0) return;
     active = i;
     const xv = xsAll[i];
     const { x, y } = geometry;
     const g = svg.querySelector(".hover");
+    if (!g) return;
     g.style.display = "";
     const cx = Math.round(x(xv)) + 0.5;
     const line = g.querySelector("line");
     line.setAttribute("x1", cx);
     line.setAttribute("x2", cx);
     g.querySelectorAll("circle").forEach((c, k) => {
-      const v = lookup[k].get(xv);
+      const v = lookup[k]?.get(xv);
       c.style.display = v == null ? "none" : "";
       if (v != null) { c.setAttribute("cx", x(xv)); c.setAttribute("cy", y(v)); }
     });
@@ -267,28 +487,159 @@ export function lineChart(container, opts) {
     return Math.abs(x(xsAll[lo]) - px) <= Math.abs(x(xsAll[hi]) - px) ? lo : hi;
   }
 
-  svg.addEventListener("pointermove", (e) => {
-    if (!geometry) return;
+  const pointAt = (e) => {
+    if (!geometry || !xsAll.length) return;
     const rect = svg.getBoundingClientRect();
     highlight(nearest((e.clientX - rect.left) * (geometry.W / rect.width)));
-  });
-  svg.addEventListener("pointerleave", clear);
+  };
+  svg.addEventListener("pointermove", pointAt);
+  // Touch: a tap shows the values and they stay until you tap elsewhere (no hover on phones).
+  svg.addEventListener("pointerdown", pointAt);
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") clear(); });
   svg.addEventListener("blur", clear);
   svg.addEventListener("keydown", (e) => {
+    if (!geometry || !xsAll.length) return;
+    if (zoomBar && ["+", "=", "-", "_", "0"].includes(e.key) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (e.key === "0") { zoomTo(null, DURATION.route); return; }
+      const [a, b] = view ?? extent();
+      const anchor = active >= 0 ? xsAll[active] : (a + b) / 2;
+      const k = e.key === "-" || e.key === "_" ? 1.5 : 1 / 1.5;
+      zoomTo(clampView(anchor - (anchor - a) * k, anchor + (b - anchor) * k), DURATION.tab);
+      return;
+    }
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
     const start = active < 0 ? xsAll.length - 1 : active;
-    highlight(Math.min(xsAll.length - 1, Math.max(0, start + (e.key === "ArrowRight" ? 1 : -1))));
+    const i = Math.min(xsAll.length - 1, Math.max(0, start + (e.key === "ArrowRight" ? 1 : -1)));
+    highlight(i);
+    const xv = xsAll[i];
+    if (view && (xv < view[0] || xv > view[1])) {            // keep the highlighted point in view
+      const span = view[1] - view[0];
+      zoomTo(clampView(xv - span / 2, xv + span / 2), DURATION.micro);
+    }
   });
 
+  // ---- zoom (opt-in) --------------------------------------------------------
+  // Ctrl/⌘ + wheel, or a trackpad pinch (which browsers send as Ctrl + wheel),
+  // zooms around the pointer; plain scrolling still scrolls the page. Each step
+  // eases to the new range from wherever the previous one had got to.
+  const extent = () => [xsAll[0], xsAll[xsAll.length - 1]];
+
+  /** A valid zoom range: at least ~5 data steps wide, inside the data; null means everything. */
+  function clampView(a, b) {
+    if (a == null || !xsAll.length) return null;
+    const [f0, f1] = extent();
+    const minSpan = Math.min(f1 - f0, ((f1 - f0) / Math.max(1, xsAll.length - 1)) * 5);
+    const span = Math.max(minSpan, b - a);
+    if (span >= (f1 - f0) * 0.995) return null;
+    const lo = Math.min(Math.max(a, f0), f1 - span);
+    return [lo, lo + span];
+  }
+
+  function paintZoom() {
+    container.classList.toggle("is-zoomed", Boolean(view));
+    if (!zoomBar) return;
+    zoomBar.querySelector('[data-zoom="reset"]').disabled = !view;
+    const focus = zoomBar.querySelector('[data-zoom="focus"]');
+    focus.hidden = !o.focus;
+    if (o.focus) focus.textContent = o.focus.label || "Zoom in";
+  }
+
+  function zoomTo(next, duration) {
+    if (!next && !view) return;
+    const from = currentFrame();
+    view = next;
+    paintZoom();
+    morphFrom(from, duration);
+  }
+
+  svg.addEventListener("wheel", (e) => {
+    if (!zoomBar || !(e.ctrlKey || e.metaKey) || !geometry || !xsAll.length) return;
+    e.preventDefault();                                          // zoom the chart, not the page
+    const { m, W } = geometry;
+    const rect = svg.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (W / rect.width);
+    const f = Math.min(1, Math.max(0, (px - m.left) / (W - m.left - m.right)));
+    const [a, b] = view ?? extent();
+    const k = Math.exp(Math.max(-0.5, Math.min(0.5, e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0025))));
+    const anchor = a + (b - a) * f;                              // the date under the pointer stays put
+    zoomTo(clampView(anchor - (anchor - a) * k, anchor + (b - anchor) * k), DURATION.micro);
+  }, { passive: false });
+
+  // Drag to pan while zoomed (mouse only; on touch a drag keeps scrolling the page).
+  let drag = null;
+  svg.addEventListener("pointerdown", (e) => {
+    if (!view || e.pointerType !== "mouse" || e.button !== 0 || !geometry) return;
+    drag = { x: e.clientX, view };
+    svg.setPointerCapture(e.pointerId);
+    container.classList.add("is-panning");
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const { m, W } = geometry;
+    const plot = svg.getBoundingClientRect().width * ((W - m.left - m.right) / W);
+    const dx = ((e.clientX - drag.x) / plot) * (drag.view[1] - drag.view[0]);
+    stopMorph();
+    view = clampView(drag.view[0] - dx, drag.view[1] - dx);    // follows the pointer directly
+    draw(true);
+  });
+  const endDrag = () => { drag = null; container.classList.remove("is-panning"); };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+  svg.addEventListener("dblclick", () => zoomTo(null, DURATION.route));
+
+  configure(opts);
+  if (o.zoom) {
+    const mod = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl";
+    zoomBar = document.createElement("div");
+    zoomBar.className = "chart-zoombar";
+    zoomBar.innerHTML = `<button type="button" class="btn btn-ghost btn-sm" data-zoom="focus" hidden></button>
+      <button type="button" class="btn btn-ghost btn-sm" data-zoom="reset" disabled>Reset zoom</button>
+      <span class="caption zoom-hint">Zoom: hold ${mod} and scroll (or pinch) over the chart · drag to pan · double-click to reset</span>`;
+    container.appendChild(zoomBar);
+    zoomBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-zoom]");
+      if (!b) return;
+      if (b.dataset.zoom === "reset") zoomTo(null, DURATION.route);
+      else if (o.focus) zoomTo(clampView(toNum(o.focus.x0), toNum(o.focus.x1)), DURATION.route);
+    });
+    paintZoom();
+  }
+  draw(true);                                 // synchronous first paint
   const stop = observe(container, draw);
-  return { destroy: stop };
+  return {
+    /**
+     * Redraw in place with new options (same SVG, observer and tooltip).
+     * animate: morph from what is on screen now (interruptible: a change made
+     * mid-morph continues from the current in-between state).
+     */
+    update(next, { animate = false, duration = DURATION.card, resetZoom = false } = {}) {
+      const from = animate ? currentFrame() : null;
+      stopMorph();
+      configure({ ...o, ...next });
+      view = resetZoom || !view ? null : clampView(view[0], view[1]);   // a zoom survives new data
+      paintZoom();
+      morphFrom(from, animate ? duration : 0);
+    },
+    /** Move the highlighted points only; the rest of the chart is untouched. */
+    setPoints(points) {
+      o.points = points;
+      if (anim) { anim.to = { ...anim.to, points: framePoints(points) }; return; }
+      if (!shown || !geometry) { draw(true); return; }
+      shown = { ...shown, points: framePoints(points) };
+      const g = svg.querySelector(".pts");
+      if (g) g.innerHTML = pointsMarkup(shown.points, geometry);
+      else render(shown, drawnW);
+    },
+    destroy() { stopMorph(); stop(); },
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Column chart (one series) with per-bar tooltips
 // ---------------------------------------------------------------------------
-/** items: [{ label, value, color?, title? }] */
+/** items: [{ label, value, color?, title? }]. Returns { update(items, { animate }), destroy() }. */
 export function columnChart(container, { items, height = 220, yFormat = String, color = "var(--accent)",
                                          label = "Column chart", tickEvery = 1 }) {
   container.classList.add("chart");
@@ -298,25 +649,32 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
   svg.setAttribute("aria-label", label);
   container.appendChild(svg);
   const tip = makeTooltip(container);
+  let drawnW = 0;
+  let shown = null;      // { yMax, ticks: [{v, a}], values: [] }
+  let anim = null;
 
-  function draw() {
-    const W = container.clientWidth;
-    if (!W || !items.length) return;
+  function frameFor(list) {
+    const nice = niceTicks(0, Math.max(...list.map((d) => d.value)), 4);
+    return { yMax: nice.max, ticks: nice.ticks.map((v) => ({ v, a: 1 })), values: list.map((d) => d.value) };
+  }
+
+  function render(F, W) {
     const m = { top: 12, right: 8, bottom: 26, left: 48 };
-    const max = Math.max(...items.map((d) => d.value));
-    const nice = niceTicks(0, max, 4);
-    const y = linear(0, nice.max, height - m.bottom, m.top);
+    const y = linear(0, F.yMax, height - m.bottom, m.top);
     const band = (W - m.left - m.right) / items.length;
     const barW = Math.min(24, Math.max(2, band - 2));             // 2px surface gap between bars
     const parts = [];
-    for (const t of nice.ticks) {
-      const yy = Math.round(y(t)) + 0.5;
-      parts.push(`<line class="gridline" x1="${m.left}" x2="${W - m.right}" y1="${yy}" y2="${yy}"/>`);
-      parts.push(`<text x="${m.left - 8}" y="${yy + 4}" text-anchor="end">${esc(yFormat(t))}</text>`);
+    for (const t of F.ticks) {
+      if (t.a < 0.02) continue;
+      const yy = Math.round(y(t.v)) + 0.5;
+      if (yy < m.top - 1) continue;
+      const op = opacityAttr(t.a);
+      parts.push(`<line class="gridline" x1="${m.left}" x2="${W - m.right}" y1="${yy}" y2="${yy}"${op}/>`);
+      parts.push(`<text x="${m.left - 8}" y="${yy + 4}" text-anchor="end"${op}>${esc(yFormat(t.v))}</text>`);
     }
     items.forEach((d, i) => {
       const cx = m.left + band * i + band / 2;
-      const top = y(d.value);
+      const top = Math.max(m.top, y(F.values[i]));
       const h = Math.max(0, height - m.bottom - top);
       const r = Math.min(4, barW / 2, h);
       const x0 = cx - barW / 2;
@@ -338,6 +696,19 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
     svg.dataset.width = W;
   }
 
+  function draw(force = false) {
+    const W = container.clientWidth;
+    if (!W || (!force && W === drawnW)) return;
+    const resized = W !== drawnW;
+    drawnW = W;
+    if (!items.length) { anim?.cancel(); anim = null; shown = null; emptyState(svg, W, height, "No data to show"); return; }
+    if (anim && !resized) return;
+    anim?.cancel();
+    anim = null;
+    shown = frameFor(items);
+    render(shown, W);
+  }
+
   function show(i) {
     const d = items[i];
     if (!d) return;
@@ -354,8 +725,34 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
   svg.addEventListener("focusin", (e) => { const i = e.target.dataset.i; if (i != null) show(+i); });
   svg.addEventListener("focusout", () => tip.hide());
 
+  draw(true);                                 // synchronous first paint
   const stop = observe(container, draw);
-  return { destroy: stop };
+  return {
+    /** New data in place; with animate, bars grow/shrink from their current heights. */
+    update(next, { animate = false } = {}) {
+      const W = container.clientWidth;
+      const from = shown;
+      const canMorph = animate && W && W === drawnW && from && next.length && next.length === from.values.length && !reducedMotion();
+      anim?.cancel();
+      anim = null;
+      items = next;
+      if (!canMorph) { draw(true); return; }
+      const to = frameFor(items);
+      const handle = tween({
+        onUpdate: (t) => {
+          shown = {
+            yMax: lerp(from.yMax, to.yMax, t),
+            ticks: fadeUnion(from.ticks, to.ticks, (k) => k.v, t, (a, b) => b),
+            values: to.values.map((v, i) => lerp(from.values[i], v, t)),
+          };
+          render(shown, W);
+        },
+        onDone: () => { if (anim === handle) anim = null; shown = to; render(to, W); },
+      });
+      anim = handle;
+    },
+    destroy() { anim?.cancel(); stop(); },
+  };
 }
 
 // ---------------------------------------------------------------------------

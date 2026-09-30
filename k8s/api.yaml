@@ -27,6 +27,13 @@ spec:
                 secretKeyRef: { name: coe-db, key: password }
             - name: DATABASE_URL
               value: postgresql+psycopg://coe:$(POSTGRES_PASSWORD)@coe-db:5432/coe
+            # COE Analyst LLM keys (optional Secret created by deploy.sh); absent = basic mode.
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef: { name: coe-analyst, key: groq-api-key, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: coe-analyst, key: anthropic-api-key, optional: true }
           envFrom:
             - configMapRef: { name: coe-config }
           readinessProbe:

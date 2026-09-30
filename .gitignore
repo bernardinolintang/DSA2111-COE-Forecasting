@@ -17,3 +17,8 @@ ml/data/artifacts/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Front-end test tooling
+node_modules/
+frontend/test-results/
+frontend/playwright-report/

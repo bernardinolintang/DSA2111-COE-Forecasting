@@ -16,7 +16,7 @@ from sqlalchemy.engine import Connection
 
 from .config import settings
 from .db import get_connection, ping, wait_and_migrate
-from .routers import alerts, forecast, market, model, policy
+from .routers import alerts, analyst, forecast, market, model, policy
 from .schemas import Health
 from .services import repository as repo
 
@@ -54,6 +54,6 @@ def health(conn: Connection = Depends(get_connection)):
             "version": settings.version}
 
 
-for router in (market.router, forecast.router, policy.router, model.router, alerts.router):
+for router in (market.router, forecast.router, policy.router, model.router, alerts.router, analyst.router):
     api.include_router(router)
 app.include_router(api)

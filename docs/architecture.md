@@ -113,7 +113,44 @@ Differences from the original paper, and why:
 | `GET /api/model/backtest/{cat}?model=&horizon=` | out-of-sample predictions vs actuals |
 | `GET /api/model/interpretability` | TFT variable importance and attention |
 | `GET /api/model/runs` | pipeline history |
-| `GET/POST/DELETE /api/alerts` | anonymous price alerts |
+| `GET/POST/DELETE /api/alerts` | anonymous watchlist targets (409 on duplicates) |
 | `GET /api/macro` | CPI inflation, SORA, GDP |
+| `GET /api/glossary` | plain-language + technical definitions ("Explain this", the analyst) |
+| `GET /api/analyst/status` | analyst mode: `llm` (Claude configured) or `offline` (basic mode) |
+| `POST /api/analyst/chat` | COE Analyst: conversation + current view → reply, validated app actions, provenance (`?stream=1`: Server-Sent Events) |
 
 Interactive documentation (OpenAPI/Swagger) is served at `/api/docs`.
+
+## 6. COE Analyst and onboarding
+
+```mermaid
+flowchart LR
+    page[Current page<br/>publishes view: page, category,<br/>scenario, bid, event] --> drawer[Analyst panel]
+    drawer -->|POST /api/analyst/chat<br/>messages + view + client_id| api[FastAPI]
+    api --> ctx[Context builder<br/>re-reads every number from Postgres]
+    ctx --> mode{GROQ_API_KEY or<br/>ANTHROPIC_API_KEY?}
+    mode -->|yes| llm[Groq or Claude tool loop<br/>data tools run on the server]
+    mode -->|no, or LLM fails| basic[Basic mode<br/>deterministic intents]
+    llm & basic --> wl[Action whitelist<br/>validate + mark persistent ones confirm=true]
+    wl -->|streamed reply (SSE), actions, provenance| drawer
+    drawer -->|safe actions| page
+    drawer -->|Confirm click only| alerts[/POST /api/alerts/]
+```
+
+Details, the tour flow and the test plan are in `docs/analyst-and-onboarding.md`.
+
+## 7. Front-end motion
+
+Motion is used only to show what changed, where you went, and what an action affected. There is no animation library. The browser's own APIs are enough.
+
+| Piece | Where | What it does |
+|---|---|---|
+| Tokens | `--dur-*` / `--ease-*` in `styles.css`, `DURATION` / `EASING` in `js/motion.js` | 140 ms (buttons) to 300 ms (page changes); one ease-out curve |
+| Animated numbers | `animateNumber()` | Premiums, medians and probabilities count from the value on screen to the new one. They show only formatted values, can be interrupted, and are never animated on first render. The live region is `aria-busy` while counting. |
+| Sliding selection | `attachThumb()` (via `onSegment`, and the main nav) | One indicator slides to whichever button is pressed |
+| Chart morphs | `lineChart().update(next, { animate: true })`, `columnChart().update()` | Interpolates from the frame on screen: series are matched by key and points by x (resampled when the grids differ); ticks, markers and regions fade. `setPoints()` moves only the bid marker. |
+| Chart zoom | `lineChart({ zoom: true, focus })` (Forecast, Policy Lab, Model backtest) | Ctrl/⌘ + wheel or pinch zooms around the pointer, and plain scrolling still scrolls the page. Drag pans; double-click, "Reset zoom" or `0` goes back. The y-axis fits what is in view. A scenario or category change keeps the zoom; a History range clears it. |
+| In-place pages | `page.navigate()` (router in `app.js`) | Category and query changes on Forecast, Bid planner and Policy Lab update the page instead of re-rendering it. Back/Forward work the same way. |
+| Shared-element navigation | `requestShared()` plus the View Transition API | An Overview card's premium, median, signal and category morph into the Forecast page's key figures (Chromium, Safari, recent Firefox; other browsers get a plain fade) |
+
+With `prefers-reduced-motion`, movement is replaced by an immediate change plus a short fade. Numbers jump to their final value, and view transitions, morphs and slides are turned off.

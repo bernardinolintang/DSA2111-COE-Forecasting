@@ -15,6 +15,22 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
 
+    # The COE Analyst may call a language model and a few tools per question,
+    # so it gets a longer read timeout than the rest of the API.
+    location /api/analyst/ {
+        proxy_pass http://${API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+        # Answers are streamed (Server-Sent Events): pass each chunk straight through.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_set_header Accept-Encoding "";
+    }
+
     location /api/ {
         proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;

@@ -5,6 +5,7 @@ Run inside docker compose:
 They are skipped automatically when no database is reachable.
 """
 
+import json
 import uuid
 
 import pytest
@@ -41,6 +42,19 @@ def test_summary_has_all_categories(client):
     body = client.get("/api/summary").json()
     assert [c["code"] for c in body["categories"]] == ["A", "B", "C", "D", "E"]
     assert all(c["signal"]["action"] in ("wait", "buy_now") for c in body["categories"])
+    for c in body["categories"]:
+        s = c["signal"]
+        assert s["conviction"] in ("high", "medium", "low")
+        assert s["label"] in ("Buy now", "Lean buy", "Wait", "Lean wait")
+        assert s["prob_higher_pct"] == pytest.approx(100 - s["prob_lower_pct"], abs=0.11)
+
+
+def test_recommendation_matches_summary_signal(client):
+    """The overview card and the forecast page must never disagree."""
+    cards = {c["code"]: c["signal"] for c in client.get("/api/summary").json()["categories"]}
+    for code, signal in cards.items():
+        rec = client.get(f"/api/recommendation/{code}").json()
+        assert (rec["action"], rec["label"], rec["conviction"]) == (signal["action"], signal["label"], signal["conviction"])
 
 
 @pytest.mark.parametrize("scenario", ["base", "quota_plus_20", "quota_minus_20"])
@@ -84,3 +98,77 @@ def test_alert_lifecycle(client):
     assert len(client.get(f"/api/alerts?client_id={cid}").json()) == 1
     assert client.delete(f"/api/alerts/{alert['id']}?client_id={cid}").status_code == 204
     assert client.get(f"/api/alerts?client_id={cid}").json() == []
+
+
+def test_alert_shows_forecast_context_and_rejects_duplicates_and_bad_targets(client):
+    cid = str(uuid.uuid4())
+    body = {"client_id": cid, "category": "B", "direction": "below", "target": 100000}
+    first = client.post("/api/alerts", json=body)
+    assert first.status_code == 201
+    alert = first.json()
+    assert alert["next_label"] and alert["next_q50"] > 0 and alert["horizon_label"]
+    dup = client.post("/api/alerts", json=body)
+    assert dup.status_code == 409 and "already watching" in dup.json()["detail"]
+    for bad in (0, -200, "abc", None, 1_000_000):
+        assert client.post("/api/alerts", json={**body, "target": bad}).status_code == 422
+    client.delete(f"/api/alerts/{alert['id']}?client_id={cid}")
+
+
+# ---------------------------------------------------------------------------
+# COE Analyst (these run in basic mode unless ANTHROPIC_API_KEY is set)
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def basic_mode(monkeypatch):
+    """Keep these tests deterministic and free: never call a real LLM, even if a key is configured."""
+    import dataclasses
+
+    from app.routers import analyst as analyst_router
+    monkeypatch.setattr(analyst_router, "settings", dataclasses.replace(analyst_router.settings, analyst_provider="offline"))
+
+
+def _ask(client, question, **view):
+    return client.post("/api/analyst/chat", json={"messages": [{"role": "user", "content": question}],
+                                                  "view": view, "client_id": str(uuid.uuid4())})
+
+
+def test_glossary_and_status(client):
+    terms = {t["id"]: t for t in client.get("/api/glossary").json()}
+    assert {"range-80", "significance", "box-tiao", "conviction", "smape", "attention"} <= set(terms)
+    assert client.get("/api/analyst/status").json()["mode"] in ("llm", "offline")
+
+
+def test_analyst_navigation_and_provenance(client):
+    res = _ask(client, "Show me Cat E", page="overview")
+    assert res.status_code == 200
+    body = res.json()
+    nav = [a for a in body["actions"] if a["type"] == "navigate"]
+    assert nav and nav[0]["params"]["page"] == "forecast" and nav[0]["params"]["category"] == "E"
+    assert body["provenance"] and "bidding exercise" in body["provenance"]
+
+
+def test_analyst_alert_requests_need_confirmation(client):
+    body = _ask(client, "Alert me when Cat A falls below $110k", page="alerts").json()
+    drafts = [a for a in body["actions"] if a["type"] == "prepare_watch"]
+    assert drafts and all(a["confirm"] for a in drafts)
+    assert drafts[0]["params"]["target"] == 110000
+
+
+def test_analyst_streams_server_sent_events(client):
+    body = {"messages": [{"role": "user", "content": "Show me Cat E"}], "view": {"page": "overview"}}
+    with client.stream("POST", "/api/analyst/chat?stream=1", json=body) as res:
+        assert res.status_code == 200 and res.headers["content-type"].startswith("text/event-stream")
+        raw = "".join(res.iter_text())
+    events = [block.split("\n") for block in raw.strip().split("\n\n")]
+    kinds = [lines[0].removeprefix("event: ") for lines in events]
+    assert kinds[0] == "status" and "delta" in kinds and kinds[-1] == "done"
+    done = json.loads(events[-1][1].removeprefix("data: "))
+    assert done["actions"][0]["params"] == {"page": "forecast", "category": "E"}
+    assert done["mode"] in ("llm", "offline") and done["provenance"]
+
+
+def test_analyst_validates_requests(client):
+    assert client.post("/api/analyst/chat", json={"messages": []}).status_code == 422
+    too_long = [{"role": "user", "content": "x" * 1001}]
+    assert client.post("/api/analyst/chat", json={"messages": too_long}).status_code == 422
+    bad_view = {"messages": [{"role": "user", "content": "hi"}], "view": {"page": "admin"}}
+    assert client.post("/api/analyst/chat", json=bad_view).status_code == 422

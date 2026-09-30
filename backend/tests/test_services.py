@@ -46,13 +46,40 @@ def test_wait_when_median_drops_more_than_threshold():
 def test_buy_now_when_drop_is_small():
     advice = advise("Cat A", 100_000, _steps([99_000, 97_000, 96_000]), [], threshold=0.08)
     assert advice.action == "buy_now"
-    assert "No meaningful drop" in advice.summary
+    # the median is 4% lower, so a fall is more likely than a rise: a weak buy, worded as such
+    assert advice.conviction == "low" and advice.label == "Lean buy"
+    assert "may drift lower" in advice.summary
 
 
 def test_buy_now_when_prices_rise():
     advice = advise("Cat B", 100_000, _steps([103_000, 106_000, 110_000]), [], threshold=0.08)
     assert advice.action == "buy_now"
     assert advice.confidence_pct > 50
+    assert advice.conviction == "high" and advice.label == "Buy now"
+
+
+def test_flat_forecast_is_a_lean_buy_not_a_strong_one():
+    """The case from the demo: median ~1% above today with wide ranges."""
+    advice = advise("Cat A", 131_890, _steps([133_000, 133_300]), [], threshold=0.08)
+    assert advice.action == "buy_now"            # the rule's result is unchanged ...
+    assert advice.label == "Lean buy"            # ... but it is no longer presented as a strong call
+    assert advice.conviction in ("low", "medium")
+    assert advice.prob_higher_pct == pytest.approx(100 - advice.prob_lower_pct)
+
+
+def test_prob_save_is_the_chance_of_beating_the_threshold():
+    steps = _steps([100_000])                    # quantiles 80k ... 120k around a flat median
+    advice = advise("Cat A", 100_000, steps, [], threshold=0.08)
+    expected = qt.cdf(qt.row_values(steps[-1]), 92_000) * 100
+    assert advice.prob_save_pct == pytest.approx(round(expected, 1))
+    assert advice.prob_save_pct < advice.prob_lower_pct
+
+
+def test_wait_conviction_uses_prob_save():
+    strong = advise("Cat A", 100_000, _steps([85_000]), [], threshold=0.08)
+    assert strong.action == "wait" and strong.label == "Wait" and strong.conviction == "high"
+    lean = advise("Cat A", 100_000, _steps([91_900]), [], threshold=0.08)
+    assert lean.action == "wait" and lean.label == "Lean wait"
 
 
 def test_alert_outlook():
@@ -60,3 +87,9 @@ def test_alert_outlook():
     assert alert_outlook("below", 120_000, 100_000, steps)["status"] == "triggered"
     assert alert_outlook("below", 91_000, 100_000, steps)["status"] == "likely"
     assert alert_outlook("below", 50_000, 100_000, steps)["status"] == "unlikely"
+
+
+def test_alert_outlook_reports_next_and_horizon_medians():
+    o = alert_outlook("below", 91_000, 100_000, _steps([95_000, 90_000]))
+    assert o["next_q50"] == pytest.approx(95_000) and o["horizon_q50"] == pytest.approx(90_000)
+    assert o["next_label"] == "Oct 2026 · 1st" and o["horizon_label"] == "Oct 2026 · 2nd"

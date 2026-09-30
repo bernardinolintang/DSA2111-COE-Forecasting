@@ -52,6 +52,13 @@ if ! $KUBECTL -n "$NAMESPACE" get secret coe-db >/dev/null 2>&1; then
   # A random password, generated once and stored only inside the cluster.
   $KUBECTL -n "$NAMESPACE" create secret generic coe-db --from-literal=password="$(openssl rand -hex 16)"
 fi
+# Optional: the COE Analyst's language model. Without a key the analyst runs in basic mode.
+#   GROQ_API_KEY=gsk_... bash scripts/ronin/deploy.sh      (or ANTHROPIC_API_KEY=sk-ant-...)
+if [[ -n "${GROQ_API_KEY:-}${ANTHROPIC_API_KEY:-}" ]]; then
+  $KUBECTL -n "$NAMESPACE" create secret generic coe-analyst \
+    --from-literal=groq-api-key="${GROQ_API_KEY:-}" --from-literal=anthropic-api-key="${ANTHROPIC_API_KEY:-}" \
+    --dry-run=client -o yaml | $KUBECTL apply -f -
+fi
 
 log "Applying manifests"
 if [[ "$TAG" != "v1" ]]; then

@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 CategoryCode = Literal["A", "B", "C", "D", "E"]
 
@@ -85,11 +85,18 @@ class Scenario(BaseModel):
     description: str
 
 
+Conviction = Literal["high", "medium", "low"]
+
+
 class Signal(BaseModel):
     action: Literal["wait", "buy_now"]
     headline: str
+    label: str
+    conviction: Conviction
     expected_change_pct: float
     prob_lower_pct: float
+    prob_higher_pct: float
+    prob_save_pct: float
 
 
 class CategorySummary(Category):
@@ -118,9 +125,13 @@ class Recommendation(BaseModel):
     scenario: str
     action: Literal["wait", "buy_now"]
     headline: str
+    label: str
+    conviction: Conviction
     summary: str
     expected_change_pct: float
     prob_lower_pct: float
+    prob_higher_pct: float
+    prob_save_pct: float
     confidence_pct: float
     current: float
     horizon_label: str
@@ -223,6 +234,64 @@ class Interpretability(BaseModel):
     attention: dict[str, list[dict]]
 
 
+class GlossaryTerm(BaseModel):
+    id: str
+    term: str
+    simple: str
+    technical: str
+
+
+class AnalystStatus(BaseModel):
+    mode: Literal["llm", "offline"]
+    provider: Literal["groq", "anthropic", "offline"]
+    model: str | None
+
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=6000)
+
+
+class AnalystView(BaseModel):
+    """Where the viewer is. Only identifiers: the numbers are re-read on the server."""
+    page: Literal["overview", "forecast", "bid", "policy", "model", "alerts"] = "overview"
+    category: CategoryCode | None = None
+    scenario: Literal["base", "quota_minus_20", "quota_minus_10", "quota_plus_10", "quota_plus_20"] | None = None
+    bid: float | None = Field(default=None, gt=0, lt=10_000_000)
+    event: str | None = Field(default=None, max_length=64)
+
+
+class AnalystRequest(BaseModel):
+    messages: list[ChatTurn] = Field(min_length=1, max_length=30)
+    view: AnalystView = AnalystView()
+    client_id: UUID | None = None
+
+    @field_validator("messages")
+    @classmethod
+    def _last_is_question(cls, messages: list[ChatTurn]) -> list[ChatTurn]:
+        if messages[-1].role != "user":
+            raise ValueError("the last message must be the user's question")
+        if len(messages[-1].content) > 1000:
+            raise ValueError("questions are limited to 1,000 characters")
+        return messages
+
+
+class AnalystAction(BaseModel):
+    type: Literal["navigate", "set_supply_scenario", "set_bid_amount", "highlight", "open_tutorial",
+                  "prepare_watch", "prepare_remove_watch"]
+    params: dict
+    confirm: bool
+    summary: str
+
+
+class AnalystReply(BaseModel):
+    reply: str
+    actions: list[AnalystAction]
+    mode: Literal["llm", "offline"]
+    provenance: str | None
+    notice: str | None
+
+
 class AlertIn(BaseModel):
     client_id: UUID
     category: CategoryCode
@@ -242,3 +311,7 @@ class Alert(BaseModel):
     status: Literal["triggered", "likely", "possible", "unlikely"]
     probability_pct: float
     when: str | None
+    next_label: str | None = None
+    next_q50: float | None = None
+    horizon_label: str | None = None
+    horizon_q50: float | None = None

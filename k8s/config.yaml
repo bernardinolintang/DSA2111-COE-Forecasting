@@ -8,3 +8,4 @@ metadata:
 data:
   WAIT_THRESHOLD: "0.08"      # "wait" when the median is >= 8% below today's premium
   COE_WORKERS: "2"            # worker processes for the ML pipeline (shared VM: keep small)
+  ANALYST_MODEL: ""           # COE Analyst model; empty = provider default (Groq: openai/gpt-oss-120b)

@@ -151,6 +151,14 @@ def count_alerts(conn: Connection, client_id: str) -> int:
                         {"cid": client_id}).scalar_one()
 
 
+def find_alert(conn: Connection, client_id: str, category: str, direction: str, target: int) -> dict | None:
+    """An identical alert (same client, category, direction and target), if one exists."""
+    return _one(conn, """
+        SELECT id FROM price_alerts
+        WHERE client_id = :cid AND category = :cat AND direction = :dir AND target = :target
+        LIMIT 1""", cid=client_id, cat=category, dir=direction, target=target)
+
+
 def create_alert(conn: Connection, client_id: str, category: str, direction: str,
                  target: int, label: str | None) -> dict:
     row = _one(conn, """
