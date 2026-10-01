@@ -1,0 +1,24 @@
+{
+  "note": "Measured on 1 Oct 2026 against the Docker Compose stack on a laptop (model run 39). Latency: 100 sequential GET requests per endpoint through nginx (http://localhost:8080/api/...), after 5 warm-up requests.",
+  "api_latency_ms": {
+    "health": {"median": 5.4, "p95": 9.3},
+    "summary": {"median": 11.3, "p95": 21.0},
+    "forecast/A": {"median": 8.5, "p95": 12.1},
+    "recommendation/A": {"median": 8.0, "p95": 10.6},
+    "bid-planner/A?bid=135000": {"median": 11.9, "p95": 20.1},
+    "policy/events": {"median": 7.4, "p95": 11.3},
+    "model/metrics": {"median": 8.7, "p95": 10.1},
+    "history/A?years=5": {"median": 6.2, "p95": 7.8}
+  },
+  "pipeline_duration_s": {"run_37": 457.47, "run_38": 343.96, "run_39": 398.43},
+  "image_size": {"coe-web": "94 MB", "coe-api": "318 MB", "coe-ml": "1.87 GB"},
+  "tests_passed": {"ml_pytest": 19, "api_pytest": 63, "frontend_unit": 14, "playwright_e2e": 53},
+  "parameters": {"tft": 88120, "lstm": 5579},
+  "predictability_r2_vs_random_walk": {"h1": 0.020, "h3": 0.009, "h6": 0.030},
+  "wait_rule_backtest": {"six_step_forecasts": 335, "min_median_change_pct": -2.24, "max_median_change_pct": 7.86, "times_triggered": 0, "actual_falls_of_8pct_or_more": 54},
+  "scenario_shift_of_6step_median_pct": {
+    "quota_minus_20": {"A": 0.72, "B": 0.76, "C": 0.52, "D": 1.37, "E": 0.88},
+    "quota_plus_20": {"A": -1.26, "B": -1.10, "C": -1.19, "D": -1.60, "E": -0.99}
+  },
+  "sarima_reference_mape_pct": {"source": "github.com/axellee1994/coe-forecasting README, Sep 2026, one round ahead, last 24 rounds", "A": [3.65, 3.83], "B": [4.54, 4.64], "C": [1.86, 1.94], "D": [4.63, 4.52], "E": [2.71, 2.69]}
+}
