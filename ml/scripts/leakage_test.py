@@ -1,6 +1,7 @@
 """Leakage test: does any forecast in the backtest use data from after its origin?
 
-    cd ml && python scripts/leakage_test.py          # ~5 min on a laptop, uses the data snapshot
+    cd ml && python scripts/leakage_test.py                  # all models, ~5 min on a laptop
+    cd ml && python scripts/leakage_test.py tft naive        # only some models
 
 Runs the backtest twice with the cheap ``fast_config``: once on the real data and
 once with every premium and bid count after a cut-off (the middle of the test
@@ -8,6 +9,8 @@ period) multiplied by random noise. Forecasts made at origins up to the cut-off
 must be bit-identical in both runs. As a control, forecasts after the cut-off
 must change, which shows the test would catch a model that used the data.
 Exits with status 1 if any early forecast changed.
+
+``notebooks/fairness_checks.ipynb`` runs the same steps one at a time.
 """
 
 from __future__ import annotations
@@ -16,52 +19,73 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coe_ml import evaluation, ingest                     # noqa: E402
-from coe_ml.config import fast_config                     # noqa: E402
+from coe_ml.config import PipelineConfig, fast_config     # noqa: E402
 from coe_ml.features import build_panel                   # noqa: E402
 
 MODELS = ["tft", "lstm", "gbm", "arima", "arimax_boxtiao", "naive"]
+SCRAMBLED_COLUMNS = ["premium", "bids_received", "bids_success"]
 
 
-def main() -> None:
+def load() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, PipelineConfig, int]:
+    """Raw COE + macro data from the snapshot, the model panel, the config and the cut-off."""
     coe, macro = ingest.load_coe_results(offline=True), ingest.load_macro(offline=True)
     panel = build_panel(coe, macro)
     cfg = fast_config()
-    n = int(panel["time_idx"].max()) + 1
-    test_start = n - cfg.backtest.test_exercises
-    cut = test_start + cfg.backtest.test_exercises // 2
+    test_start = int(panel["time_idx"].max()) + 1 - cfg.backtest.test_exercises
+    return coe, macro, panel, cfg, test_start + cfg.backtest.test_exercises // 2
 
-    # Scramble premiums and bids of every exercise after the cut-off.
+
+def scramble_after(coe: pd.DataFrame, panel: pd.DataFrame, cut: int, seed: int = 1) -> tuple[pd.DataFrame, np.ndarray]:
+    """Multiply premiums and bids of every exercise after ``cut`` by random noise (x0.3 to x3)."""
     exercises = panel.drop_duplicates("time_idx").set_index("time_idx")
     after = set(zip(exercises.loc[cut + 1:, "month"].dt.strftime("%Y-%m-%d"), exercises.loc[cut + 1:, "bidding_no"]))
     mask = np.array([(m, b) in after for m, b in zip(coe["month"].astype(str).str[:10], coe["bidding_no"])])
     scrambled = coe.copy()
-    rng = np.random.default_rng(1)
-    for col in ["premium", "bids_received", "bids_success"]:
+    rng = np.random.default_rng(seed)
+    for col in SCRAMBLED_COLUMNS:
         scrambled.loc[mask, col] = (scrambled.loc[mask, col] * rng.uniform(0.3, 3.0, mask.sum())).round()
-    print(f"Scrambled {mask.sum()} rows after exercise {cut} (test period {test_start}..{n - 1})")
+    return scrambled, mask
 
-    real = evaluation.backtest(panel, cfg, n_seeds=1, models=MODELS).predictions
-    fake = evaluation.backtest(build_panel(scrambled, macro), cfg, n_seeds=1, models=MODELS).predictions
 
+def compare(real: pd.DataFrame, fake: pd.DataFrame, cut: int) -> pd.DataFrame:
+    """Join both backtests' predictions; ``max_diff`` is the largest change in p10/p50/p90 (SGD)."""
     both = real.merge(fake, on=["model", "category", "origin", "horizon"], suffixes=("", "_s"))
     both["max_diff"] = np.abs(both[["q10", "q50", "q90"]].to_numpy()
                               - both[["q10_s", "q50_s", "q90_s"]].to_numpy()).max(axis=1)
-    before, later = both[both["origin"] <= cut], both[both["origin"] > cut]
+    both["before_cut"] = both["origin"] <= cut
+    return both
 
-    print("\nForecasts made BEFORE the cut-off (must not change):")
+
+def summarise(both: pd.DataFrame) -> bool:
+    """Print the verdict; True when no forecast before the cut-off changed."""
+    before, later = both[both["before_cut"]], both[~both["before_cut"]]
+    print("Forecasts made BEFORE the cut-off (must not change):")
     print(before.groupby("model")["max_diff"].max().map(lambda v: f"max change S${v:,.6f}").to_string())
     print(f"  -> {(before['max_diff'] == 0).mean() * 100:.1f}% of {len(before)} forecasts bit-identical")
     print("\nControl: forecasts made AFTER the cut-off (must change):")
     print(f"  -> {(later['max_diff'] > 1).mean() * 100:.1f}% of {len(later)} forecasts changed by > S$1")
+    passed = not (before["max_diff"] > 0).any()
+    print("\nPASS: no forecast uses data from after its origin" if passed
+          else "\nLEAK: a forecast changed when only later data was scrambled")
+    return passed
 
-    if (before["max_diff"] > 0).any():
-        sys.exit("LEAK: a forecast changed when only later data was scrambled")
-    print("\nPASS: no forecast uses data from after its origin")
+
+def main(models: list[str] | None = None) -> None:
+    models = models or MODELS
+    coe, macro, panel, cfg, cut = load()
+    scrambled, mask = scramble_after(coe, panel, cut)
+    print(f"Scrambled {mask.sum()} rows after exercise {cut}")
+
+    real = evaluation.backtest(panel, cfg, n_seeds=1, models=models).predictions
+    fake = evaluation.backtest(build_panel(scrambled, macro), cfg, n_seeds=1, models=models).predictions
+    if not summarise(compare(real, fake, cut)):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

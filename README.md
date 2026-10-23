@@ -108,6 +108,7 @@ ml/coe_ml/             ML pipeline package
 ml/scripts/            tune.py (hyper-parameter sweeps), predictability.py (random-walk benchmark),
                        leakage_test.py (scrambles later data, checks earlier forecasts are unchanged),
                        fairness_stats.py (bootstrap CIs, calibration and error by horizon for a stored run)
+ml/notebooks/          fairness_checks.ipynb: runs both checks step by step, and a template to run/test your own scripts
 backend/app/           FastAPI: routers/, services/ (SQL, quantile maths, advice, analyst/), glossary.py, schemas.py
 frontend/public/       dependency-free SPA (ES modules, SVG charts), served by nginx
 frontend/tests/        Node unit tests and Playwright end-to-end tests (dev tooling only)

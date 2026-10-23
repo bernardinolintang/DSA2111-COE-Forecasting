@@ -10,7 +10,10 @@ Reports, for every model in the run:
      because forecasts from neighbouring origins overlap)
   3. skill per test year (is the gain stable?)
   4. calibration: share of actuals below p10 / p50, above p90 and inside [p10, p90]
-  5. hybrid MAPE by horizon (genuine forecasts get worse further ahead)
+  5. MAPE by horizon of the hybrid (or the best model) (genuine forecasts get worse further ahead)
+
+``report(df)`` works on any predictions table, e.g. ``evaluation.backtest(...).predictions``
+plus an ``origin_premium`` column; ``notebooks/fairness_checks.ipynb`` shows how.
 """
 
 from __future__ import annotations
@@ -55,7 +58,8 @@ def block_indices(n: int, rng: np.random.Generator) -> list[np.ndarray]:
             for _ in range(N_BOOT)]
 
 
-def main(run_id: int | None = None) -> None:
+def load_predictions(run_id: int | None = None) -> tuple[int, pd.DataFrame]:
+    """Backtest predictions of ``run_id`` (default: latest succeeded run) with the origin premium."""
     engine = db.get_engine()
     with engine.connect() as conn:
         if run_id is None:
@@ -63,12 +67,20 @@ def main(run_id: int | None = None) -> None:
         df = pd.read_sql(text(QUERY), conn, params={"run_id": run_id}, parse_dates=["month"])
     if df.empty:
         sys.exit(f"run {run_id} has no backtest predictions")
+    return run_id, df
+
+
+def report(df: pd.DataFrame) -> None:
+    """Print statistics 0-5 for a predictions table (columns as in ``backtest_predictions`` + origin_premium)."""
+    if "naive" not in set(df["model"]):
+        raise ValueError("the predictions need the random walk ('naive') as the benchmark")
+    df = df.copy()
     df["loss"] = pinball(df)
     rng = np.random.default_rng(0)
 
     naive = df[df["model"] == "naive"]
     same = np.isclose(naive["q50"], naive["origin_premium"], rtol=1e-6).mean() * 100
-    print(f"Run {run_id}: {len(df)} predictions, {df['origin'].nunique()} origins, "
+    print(f"{len(df)} predictions, {df['origin'].nunique()} origins, "
           f"{df['month'].min():%b %Y} - {df['month'].max():%b %Y}")
     print(f"\n0. Integrity: random-walk median == origin premium in {same:.1f}% of rows")
 
@@ -98,7 +110,7 @@ def main(run_id: int | None = None) -> None:
     print("\n3. Skill vs random walk by test year (%)\n", skill.round(2))
 
     print("\n4. Calibration (ideal: 10% below p10, 50% below p50, 10% above p90, 80% inside)")
-    for model in ["hybrid", "tft", "arima", "naive"]:
+    for model in [m for m in ("hybrid", "tft", "arima", "naive") if m in set(df["model"])] or sorted(set(df["model"])):
         d = df[df["model"] == model]
         below10, below50, above90 = d["actual"] < d["q10"], d["actual"] < d["q50"], d["actual"] > d["q90"]
         inside = (~below10 & ~above90).groupby(d["origin"]).mean().to_numpy()
@@ -107,9 +119,16 @@ def main(run_id: int | None = None) -> None:
               f"above p90 {above90.mean() * 100:5.1f}%  inside 80% {inside.mean() * 100:5.1f}% "
               f"(CI {lo:.1f}-{hi:.1f})")
 
-    hybrid = df[df["model"] == "hybrid"]
-    by_h = ((hybrid["q50"] - hybrid["actual"]).abs() / hybrid["actual"] * 100).groupby(hybrid["horizon"]).mean()
-    print("\n5. Hybrid MAPE by horizon (%):", by_h.round(2).to_dict())
+    best = pooled.drop(index="naive")["pinball"].idxmin() if len(pooled) > 1 else "naive"
+    d = df[df["model"] == ("hybrid" if "hybrid" in pooled.index else best)]
+    by_h = ((d["q50"] - d["actual"]).abs() / d["actual"] * 100).groupby(d["horizon"]).mean()
+    print(f"\n5. {d['model'].iloc[0]} MAPE by horizon (%):", by_h.round(2).to_dict())
+
+
+def main(run_id: int | None = None) -> None:
+    run_id, df = load_predictions(run_id)
+    print(f"Run {run_id}")
+    report(df)
 
 
 if __name__ == "__main__":
