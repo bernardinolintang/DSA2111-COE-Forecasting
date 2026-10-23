@@ -105,7 +105,9 @@ ml/coe_ml/             ML pipeline package
   training.py          windows, training loop, ensembles
   evaluation.py        rolling-origin backtest, CV epoch selection, metrics, Diebold-Mariano
   pipeline.py          orchestration + database writes
-ml/scripts/            tune.py (hyper-parameter sweeps), predictability.py (random-walk benchmark)
+ml/scripts/            tune.py (hyper-parameter sweeps), predictability.py (random-walk benchmark),
+                       leakage_test.py (scrambles later data, checks earlier forecasts are unchanged),
+                       fairness_stats.py (bootstrap CIs, calibration and error by horizon for a stored run)
 backend/app/           FastAPI: routers/, services/ (SQL, quantile maths, advice, analyst/), glossary.py, schemas.py
 frontend/public/       dependency-free SPA (ES modules, SVG charts), served by nginx
 frontend/tests/        Node unit tests and Playwright end-to-end tests (dev tooling only)
