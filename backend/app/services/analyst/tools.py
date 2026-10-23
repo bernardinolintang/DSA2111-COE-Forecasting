@@ -8,12 +8,13 @@ from datetime import date
 from sqlalchemy.engine import Connection
 
 from ...glossary import glossary
-from ...labels import SCENARIOS, exercise_label
+from ...labels import exercise_label
 from .. import quantiles as qt
 from .. import repository as repo
+from .. import scenarios as sc
 from ..recommendation import alert_outlook
-from .actions import ActionError, _amount, _category
-from .context import AnalystContext, load_steps, recommendation_for
+from .actions import ActionError, _amount, _category, quota_pct
+from .context import AnalystContext, load_steps, outlook_dict, recommendation_for, steps_for_quota
 
 
 def _next(conn: Connection, ctx: AnalystContext, cat: str) -> dict:
@@ -46,19 +47,15 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                 "expected_premium_median": round(nxt["q50"])}
 
     if name == "scenario_forecast":
-        cat, scenario = _category(p.get("category")), p.get("scenario")
-        if scenario not in SCENARIOS:
-            raise ActionError("Unknown scenario.")
-        steps = load_steps(conn, ctx, cat, scenario)
+        cat, pct = _category(p.get("category")), quota_pct(p)
+        steps = steps_for_quota(conn, ctx, cat, pct)
         if not steps:
             raise ActionError("No forecast stored for this category / scenario.")
         advice = recommendation_for(ctx, cat, steps)
-        return {"category": f"Cat {cat}", "scenario": SCENARIOS[scenario]["label"],
+        return {"category": f"Cat {cat}", "scenario": sc.label(pct), "interpolated": sc.scenario_id(pct) is None,
                 "steps": [{"exercise": exercise_label(s["month"], s["bidding_no"]), "quota_assumed": s["quota"],
                            "p10": round(s["q10"]), "median": round(s["q50"]), "p90": round(s["q90"])} for s in steps],
-                "recommendation": {"label": advice.label, "conviction": advice.conviction,
-                                   "expected_change_pct": advice.expected_change_pct,
-                                   "prob_save_threshold_pct": advice.prob_save_pct}}
+                "outlook": outlook_dict(advice, summary=False)}
 
     if name == "target_outlook":
         cat = _category(p.get("category"))

@@ -3,10 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>COE Forecast</title>
-  <meta name="description" content="Policy-aware probabilistic forecasts of Singapore COE premiums: buy-or-wait signals, a bid planner and price alerts.">
-  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <title>COE Compass</title>
+  <meta name="description" content="COE Compass: understand Singapore's COE market and plan your next move. Independent forecasts, scenarios and planning tools built from official public data.">
+  <meta name="theme-color" content="#0b1f33">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,28 +18,36 @@
 </head>
 <body>
   <a class="visually-hidden" href="#app">Skip to content</a>
+
+  <!-- Market status: the latest premium for every category, the next exercise and
+       how fresh the forecast is. Shown on every page (filled in by js/app.js). -->
+  <div class="statusbar" id="statusbar" role="region" aria-label="Market status">
+    <div class="statusbar-inner" id="statusbar-inner"><span class="status-meta">Loading market status…</span></div>
+  </div>
+
   <header class="nav">
     <div class="nav-inner">
-      <a class="brand" href="#/" aria-label="COE Forecast home">
-        <img class="brand-mark" src="assets/icon.svg" alt="" width="24" height="24"><span>COE Forecast</span>
+      <a class="brand" href="#/" aria-label="COE Compass home">
+        <img class="brand-mark" src="assets/icon.svg" alt="" width="28" height="28"><span>COE Compass</span>
       </a>
       <nav aria-label="Main">
         <ul class="nav-links">
           <li><a href="#/" data-nav="overview">Overview</a></li>
           <li><a href="#/forecast/A" data-nav="forecast">Forecast</a></li>
-          <li><a href="#/bid/A" data-nav="bid">Bid planner</a></li>
-          <li><a href="#/policy" data-nav="policy">Policy Lab</a></li>
-          <li><a href="#/model" data-nav="model">Model</a></li>
-          <li><a href="#/alerts" data-nav="alerts">Watchlist</a></li>
+          <li><a href="#/plan" data-nav="plan">Plan</a></li>
+          <li><a href="#/scenario/A" data-nav="explore">Explore</a></li>
+          <li><a href="#/learn" data-nav="learn">Learn</a></li>
         </ul>
       </nav>
       <div class="nav-tools">
+        <button class="ask-btn" id="ask-compass" type="button" aria-controls="analyst" aria-expanded="false"><span class="ask-label">Ask Compass</span></button>
         <div class="help-wrap">
           <button class="icon-btn" id="help-toggle" type="button" aria-label="Help" aria-haspopup="menu" aria-expanded="false" aria-controls="help-menu"></button>
           <div class="help-menu" id="help-menu" role="menu" aria-label="Help" hidden>
             <button type="button" role="menuitem" data-help="tour"><strong>Take the 2-minute tour</strong><span>What each page shows</span></button>
-            <button type="button" role="menuitem" data-help="analyst"><strong>Ask the COE Analyst</strong><span>Questions about what you're viewing</span></button>
-            <button type="button" role="menuitem" data-help="glossary"><strong>What the terms mean</strong><span>Median, 80% range, n.s., sMAPE…</span></button>
+            <button type="button" role="menuitem" data-help="analyst"><strong>Ask Compass</strong><span>Questions about what you're viewing</span></button>
+            <button type="button" role="menuitem" data-help="glossary"><strong>What the terms mean</strong><span>Median, 80% range, outlook, n.s.…</span></button>
+            <button type="button" role="menuitem" data-help="faq"><strong>FAQ and help</strong><span>How to use each tool</span></button>
           </div>
         </div>
         <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode"></button>
@@ -48,13 +55,30 @@
     </div>
   </header>
 
+  <!-- Pages within the current section (Plan, Explore, Learn). -->
+  <nav class="subnav" id="subnav" aria-label="Section" hidden></nav>
+
   <main id="app" tabindex="-1"></main>
 
   <footer class="footer">
-    <div class="container">
-      <div>COE bidding results: Land Transport Authority via data.gov.sg (Singapore Open Data Licence). CPI, SORA and GDP: Department of Statistics Singapore.</div>
-      <div>Forecasts are probabilistic estimates for education and research, not financial advice. DSA2111 Group 7 · National University of Singapore.</div>
-      <div><a href="/api/docs" target="_blank" rel="noopener">API documentation</a></div>
+    <div class="container footer-grid">
+      <div class="footer-about">
+        <div class="footer-brand"><img src="assets/icon.svg" alt="" width="22" height="22">COE Compass</div>
+        <p>Independent COE decision-support platform powered by public data. Not affiliated with or endorsed by the Land Transport Authority or any government agency.</p>
+        <p>Forecasts are probabilistic estimates for education and research, not financial advice.</p>
+      </div>
+      <nav aria-label="Footer">
+        <ul class="footer-links">
+          <li><a href="#/learn/about">About</a></li>
+          <li><a href="#/learn/how">Methodology</a></li>
+          <li><a href="#/learn/sources">Data sources</a></li>
+          <li><a href="#/model">Model performance</a></li>
+          <li><a href="#/learn/faq">FAQ and help</a></li>
+          <li><a href="#/learn/about">Privacy</a></li>
+          <li><a href="/api/docs" target="_blank" rel="noopener">API documentation</a></li>
+        </ul>
+      </nav>
+      <p class="footer-sources">COE bidding results: Land Transport Authority via data.gov.sg (Singapore Open Data Licence). CPI, SORA and GDP: Department of Statistics Singapore. DSA2111 Group 7 · National University of Singapore.</p>
     </div>
   </footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

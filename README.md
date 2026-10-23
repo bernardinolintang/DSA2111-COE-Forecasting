@@ -1,13 +1,22 @@
-# COE Forecast — Policy-Aware COE Forecasting with Temporal Fusion Transformers
+# COE Compass — Policy-Aware COE Forecasting with Temporal Fusion Transformers
+
+*Understand the market. Plan your next move.*
 
 DSA2111 Group 7 · National University of Singapore
 
-A cloud-native web app that forecasts Singapore Certificate of Entitlement (COE)
-premiums for all five categories. It combines **Box-Tiao intervention analysis**
-(to measure policy shocks) with a **Temporal Fusion Transformer** (to forecast
-with known-future inputs), and turns the probabilistic forecast into decisions:
-a buy-or-wait signal, a bid planner and a price watchlist. A context-aware
-**COE Analyst** and a guided tour explain every number to first-time buyers.
+COE Compass is an independent, cloud-native decision-support app for Singapore's
+Certificate of Entitlement (COE) market. It forecasts premiums for all five
+categories by combining **Box-Tiao intervention analysis** (to measure policy
+shocks) with a **Temporal Fusion Transformer** (to forecast with known-future
+inputs), and turns the probabilistic forecast into things people can plan with:
+a market outlook with its evidence, a supply Scenario Lab, a bid planner, a
+personal plan and a price watchlist. **Ask Compass**, a context-aware analyst on
+every page, and a Learn section explain every number to first-time buyers.
+
+It is not a government service and does not tell anyone to buy or to wait: it
+shows where premiums may be heading, how uncertain that is, and where each
+figure came from. (Earlier iterations were called "COE Forecast"; the
+repository, images and Kubernetes objects keep the `coe-` names.)
 
 ```
              ┌────────────────────────── docker compose / microk8s ──────────────────────────┐
@@ -21,16 +30,22 @@ a buy-or-wait signal, a bid planner and a price watchlist. A context-aware
 
 ## Features
 
+Navigation: **Overview · Forecast · Plan · Explore · Learn**, with **Ask Compass** on the right and a market
+status bar (latest premium per category, next exercise, when the forecast was updated, data source) on every page.
+
 | Page | What it does |
 |---|---|
-| **Overview** | Latest premium, change and buy/wait signal for Cat A–E worded by conviction (Buy now / Lean buy / Wait / Lean wait), with sparklines |
-| **Forecast** | Fan chart (p10–p90) for the next six bidding exercises, supply what-if scenarios (±10/20% quota, kept in the URL), advice with conviction and the probabilities behind it, market pulse |
-| **Bid planner** | Chance that a given reserve price clears the next exercise (uniform-price auction); slider, typed bid and chart stay in sync |
-| **Policy Lab** | Eight policy shocks (2013 loan curbs → 2025 quota injection) explained in plain language, with Box-Tiao effects, 95% CIs and p-values under "Technical details" |
-| **Model** | "Why should I trust this model?" summary, then the technical evaluation: leaderboard vs 7 other methods, Diebold-Mariano tests, error by horizon, predicted vs actual, TFT variable importance and attention |
-| **Watchlist** | Anonymous target premiums stored in Postgres, re-scored against every new forecast; changes are flagged on the next visit (optional browser notification while a tab is open). No email/push channel, so it is not called an alert |
-| **COE Analyst** | Side panel on every page that answers questions about the numbers on screen, opens pages, sets scenarios/bids and drafts watchlist targets (saved only after Confirm). Answers stream in as they are written. Uses Groq (`GROQ_API_KEY`) or Claude (`ANTHROPIC_API_KEY`) server-side, otherwise a deterministic basic mode |
-| **Help** | Deterministic 7-step guided tour, "Explain this" (i) popovers on every technical term, and a glossary |
+| **Overview** | Starts from the visitor's goal ("What are you planning?": buying, renewing, bidding, exploring), then today's market for Cat A–E (current premium, next-exercise forecast with its likely range, market outlook and the drivers behind it) and the forecast chart |
+| **Forecast** | Fan chart for the next six bidding exercises (recorded premium solid, median forecast dashed, 50% and 80% ranges shaded, policy events marked), the **market outlook** with its evidence, the next-six table and market pulse. If the forecast is unavailable the page keeps the history and says so |
+| **Plan → My plan** | A few questions (buying or renewing, category, timing, optional COE budget) become a personal summary: outlook, forecast range, how the budget compares, a level to watch, and for renewals an estimated PQP with its projected path. Answers stay in the browser |
+| **Plan → Bid planner** | Chance that a reserve price clears the next exercise (uniform-price auction), a sentence saying where the bid sits in the forecast, and the chance at nearby bids |
+| **Plan → Watchlist** | Anonymous target premiums stored in Postgres, re-scored against every new forecast; changes are flagged on the next visit (optional browser notification while a tab is open). No email/push channel |
+| **Explore → Scenario Lab** | A slider for next quarter's quota (−20% to +20%): the expected premium and the chart respond as it is dragged, against the forecast as announced. The model is run at five supply levels; points in between are interpolated (`?quota_pct=` on the API does the same) |
+| **Explore → Policy Lab** | Eight policy shocks (2013 loan curbs → 2025 quota injection) explained in plain language, with Box-Tiao effects, 95% CIs and p-values under "Technical details" |
+| **Learn** | COE guide (what a COE is, categories, bidding, quota, renewal), how COE Compass makes forecasts (collect → model → validate → quantify uncertainty → publish), data sources, FAQ and help, About and privacy |
+| **Learn → Model performance** | "Why should I trust this model?" summary, then the technical evaluation: leaderboard vs 7 other methods, Diebold-Mariano tests, error by horizon, predicted vs actual, TFT variable importance and attention |
+| **Ask Compass** | Side panel opened from the header on every page. Answers questions about the numbers on screen, opens pages, sets the scenario slider or a bid and drafts watchlist targets (saved only after Confirm). It never tells anyone to buy or to wait. Uses Groq (`GROQ_API_KEY`) or Claude (`ANTHROPIC_API_KEY`) server-side, otherwise a deterministic basic mode |
+| **Everywhere** | Forecast details under every forecast (last updated in SGT, data through, model run, forecast ID, source), "Explain this" (i) popovers on every technical term, a 7-step guided tour, and notices instead of blank charts when something cannot be loaded |
 
 ## Quick start (any laptop with Docker Desktop)
 
@@ -129,17 +144,23 @@ scripts/               deployment and operations scripts
 5. **Evaluation**: rolling-origin backtest over the last 72 exercises (3 years) re-forecasting at every
    exercise; epochs chosen by 3-fold rolling time-series CV inside the training period; pinball loss, MAPE,
    80% coverage, directional accuracy, and Diebold–Mariano tests vs every baseline.
-6. **Decision layer**: “Wait” if the median one quota quarter ahead is ≥ 8% below today, otherwise “Buy now”;
-   the call is worded by conviction (P(higher) ≥ 65% → Buy now, else Lean buy; P(waiting saves ≥ 8%) ≥ 65% →
-   Wait, else Lean wait). Because premiums are close to a random walk the median rarely moves 8% in a quarter
-   (it never did in the 3-year backtest), so a flat forecast shows as a low-conviction Lean buy rather than a
-   strong Buy now. Bid win probability = P(premium ≤ bid) from the interpolated forecast CDF.
+6. **Decision support**: a *market outlook* read from the forecast distribution one quota quarter ahead:
+   "Downward pressure" when P(lower than today) ≥ 65%, "Slight downward pressure" from 55%, the same for a
+   higher premium, otherwise "No clear direction". It is shown with the chance of a drop of 8% or more (the
+   saving the proposal treats as meaningful), the model uncertainty (width of the 80% range) and the demand and
+   quota drivers. The app deliberately does not issue Buy / Wait calls: premiums are close to a random walk
+   (the median never moved 8% in a quarter in the 3-year backtest), and a forecast of one cost component cannot
+   make that decision. Bid win probability = P(premium ≤ bid) from the interpolated forecast CDF; the
+   estimated PQP is the average premium of the exercises in the three months before the renewal month.
 
 ## Data sources
 
 - COE bidding results: Land Transport Authority, via [data.gov.sg](https://data.gov.sg/datasets/d_69b3380ad7e51aff3a7dcc84eba52b8a/view) (Singapore Open Data Licence)
 - CPI (M213751), interest rates (M700071), GDP (M015661): [SingStat Table Builder](https://tablebuilder.singstat.gov.sg)
 
-No API keys are required. To give the COE Analyst a language model, create `.env` with `GROQ_API_KEY=...` (or
+No API keys are required. To give Ask Compass a language model, create `.env` with `GROQ_API_KEY=...` (or
 `ANTHROPIC_API_KEY=...`) and run `docker compose up -d api`; see `docs/analyst-and-onboarding.md`. A snapshot of all raw data is committed in `ml/data/snapshot/`
 so the pipeline also runs offline (`python -m coe_ml run --offline`).
+
+Design notes: `docs/coe-compass.md` (brand, outlook wording, Scenario Lab, My plan, Learn, states) and
+`docs/analyst-and-onboarding.md` (the analyst, tour and earlier UX fixes).

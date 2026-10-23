@@ -31,9 +31,39 @@ test("chart is drawn on first visit when navigating from another page", async ({
   await watchFirstPaint(page);
   await page.goto("/#/forecast/A");
   await expect(page.locator("#fan svg .series-line")).toHaveCount(2);
-  await page.locator('a[data-nav="bid"]').click();
+  await page.getByRole("link", { name: "Plan your bid" }).click();
   await expect(page.locator("#cdf svg .series-line")).toHaveCount(1);
   expect(await page.evaluate(() => window.__cdf)).toBe(true);
+});
+
+test("the planner says where the bid sits in the forecast and shows nearby bids", async ({ page, request }) => {
+  const plan = await (await request.get("/api/bid-planner/A")).json();
+  const money = (v) => `$${Math.round(v).toLocaleString("en-SG")}`;
+  await page.goto("/#/bid/A");
+  const explainText = page.locator("#bid-explain");
+  await expect(explainText).toContainText(`our median forecast (${money(plan.expected_premium)})`);
+  await expect(explainText).toContainText("inside the model's 80% range");
+
+  // Nearby bids: the current one is marked, and the chance never falls as the bid rises.
+  const rows = page.locator("#bid-ladder [data-ladder]");
+  await expect(rows).toHaveCount(5);
+  await expect(page.locator('#bid-ladder [aria-current="true"]')).toContainText(/7[4-6]%/);
+  const probs = (await rows.locator(".ladder-prob").allTextContents()).map((t) => parseInt(t.replace(/\D/g, ""), 10));
+  expect(probs).toEqual([...probs].sort((x, y) => x - y));
+
+  // A bid far above the range is explained differently.
+  await page.locator("#bid-input").fill(String(Math.round(plan.q90 + 6000)));
+  await expect(explainText).toContainText("above the model's 80% range");
+  await page.locator("#bid-input").fill(String(Math.round(plan.q10 - 6000)));
+  await expect(explainText).toContainText("below the model's 80% range");
+
+  // Choosing a nearby bid sets it everywhere.
+  const first = rows.first();
+  const bid = Number(await first.getAttribute("data-ladder"));
+  await first.click();
+  await expect(page.locator("#bid-input")).toHaveValue(bid.toLocaleString("en-SG"));
+  await expect(page.locator('#bid-ladder [aria-current="true"]')).toHaveAttribute("data-ladder", String(bid));
+  await expect(page.locator("#bid-provenance")).toContainText("Forecast ID");
 });
 
 test("slider, typed input, probability and chart marker stay synchronised", async ({ page, request }) => {

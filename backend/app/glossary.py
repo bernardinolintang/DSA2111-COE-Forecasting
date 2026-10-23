@@ -29,9 +29,10 @@ def glossary() -> dict[str, dict]:
          "Cat E COEs can be used for any vehicle type except motorcycles, so its premium tends to follow the "
          "most expensive category it can substitute for, usually Cat B."),
         ("premium", "Premium",
-         "The price everyone who wins a COE in that bidding exercise pays. It is set by the lowest successful "
-         "bid, so it is the same for all winners.",
-         "COE bidding is a uniform-price (open) auction: the quota's lowest accepted bid becomes the premium."),
+         "The price everyone who wins a COE in that bidding exercise pays. It is set at the cut-off where the "
+         "quota is filled, so it is the same for all winners, whatever they bid.",
+         "COE bidding is a uniform-price (open) auction: bids are ranked from the highest down, the quota is "
+         "filled from the top, and the cut-off price becomes the quota premium for every successful bidder."),
         ("quota", "Quota",
          "How many COEs are released in a bidding exercise. More COEs for the same number of bidders usually "
          "means a lower premium.",
@@ -57,30 +58,43 @@ def glossary() -> dict[str, dict]:
          "The further ahead, the wider the ranges, because more can change.",
          "Errors compound with the horizon: the model's error grows from about one exercise ahead to six ahead, "
          "as shown in the Model page's error-by-horizon chart."),
-        ("signal", "Buy now / Wait",
-         f"The app's rule of thumb. It says Wait only when the median forecast one quota quarter ahead is at "
-         f"least {t}% below today's premium – a saving big enough to be worth the risk of prices rising instead. "
-         f"Otherwise it says Buy now (or Lean buy). Buy now means 'waiting isn't expected to save you much', not "
-         f"'prices will definitely rise'.",
-         f"Rule: action = wait if q50(horizon) ≤ premium × (1 − {t / 100:.2f}), else buy_now. Because COE "
-         f"premiums behave close to a random walk, the median rarely moves {t}% in a quarter, so Buy now is the "
-         f"usual outcome – conviction tells you how strong it is."),
-        ("conviction", "Conviction",
-         "How clearly the forecast supports the recommendation – high, medium or low. Low conviction means the "
-         "call is close to a coin flip: for example 'Lean buy' when prices are about as likely to fall as rise "
-         "but a big enough drop to justify waiting is unlikely. It is not the probability that prices rise.",
-         f"For Buy now: high if P(premium higher at the horizon) ≥ 65%, medium if ≥ 55%, otherwise low (shown as "
-         f"Lean buy). For Wait: high if P(waiting saves ≥ {t}%) ≥ 65%, otherwise Lean wait. Probabilities come "
-         f"from the forecast distribution's quantiles, linearly interpolated."),
-        ("prob-save", f"Chance waiting saves {t}%+",
-         f"The probability that the premium at the end of the next quota quarter is at least {t}% below today's. "
-         f"That is the saving the Wait rule looks for.",
-         f"P(premium_h ≤ premium_today × (1 − {t / 100:.2f})), read from the interpolated forecast CDF."),
+        ("outlook", "Market outlook",
+         "Which way the forecast leans by the end of the next quota quarter, and how clearly: downward pressure, "
+         "slight downward pressure, no clear direction, slight upward pressure or upward pressure. It describes "
+         "the forecast. It is not advice to buy or to wait – that depends on your own situation, and the model "
+         "only forecasts the COE premium, one part of the cost of a car.",
+         "From the forecast distribution at the horizon: a direction is called 'slight' when P(lower) or "
+         "P(higher) reaches 55% and clear when it reaches 65%; otherwise 'No clear direction'. COE premiums "
+         "behave close to a random walk, so 'No clear direction' is the usual, honest result."),
+        ("uncertainty", "Model uncertainty",
+         "How wide the forecast's 80% range is compared with today's premium – low, moderate or high. High "
+         "uncertainty means the premium could land a long way from the median, so treat the median as a rough "
+         "centre rather than a prediction.",
+         "Half the width of the 80% range (p10–p90) at the horizon, as a percentage of the latest premium: low "
+         "below ±8%, moderate up to ±15%, high above that. A presentation rule, not part of the evaluated model."),
+        ("prob-drop", f"Chance of a drop of {t}% or more",
+         f"The probability that the premium at the end of the next quota quarter is at least {t}% below today's "
+         f"– a fall big enough to make a real difference to what you pay.",
+         f"P(premium_h ≤ premium_today × (1 − {t / 100:.2f})), read from the interpolated forecast CDF. {t}% is "
+         f"the saving the project treats as meaningful."),
         ("supply-scenario", "Supply scenario",
-         "A what-if for next quarter's quota: what the forecast looks like if LTA releases 10% or 20% more or "
+         "A what-if for next quarter's quota: what the forecast looks like if LTA releases up to 20% more or "
          "fewer COEs than now. 'As announced' keeps the current quota. More supply usually means lower premiums.",
          "Quotas for the rest of the current quota quarter are the announced ones; the scenario multiplies the "
-         "next quarter's quota, a known-future input to the Temporal Fusion Transformer."),
+         "next quarter's quota, a known-future input to the Temporal Fusion Transformer. The model is run at "
+         "−20%, −10%, 0, +10% and +20%; the Scenario Lab slider interpolates linearly between those runs."),
+        ("pqp", "Prevailing Quota Premium (PQP)",
+         "What you pay to renew an existing COE instead of bidding for a new one: the average of the premiums "
+         "in your category over the last three months. Renewing for 10 years costs the full PQP; renewing for 5 "
+         "years costs half, but that COE cannot be renewed again.",
+         "The moving average of the quota premiums from the bidding exercises in the three months before the "
+         "month of renewal. The app estimates it from published results; LTA publishes the official figure."),
+        ("provenance", "Forecast details (data, model, time)",
+         "Every forecast shows when it was produced, the last bidding exercise it includes, which model run "
+         "made it and where the data came from – so you can tell how fresh it is and trace it back.",
+         "The forecast ID combines the category, the first exercise forecast and the model run, e.g. "
+         "A-2026-10-E1-r39. Each run and its forecasts are kept in the database, so past forecasts can be "
+         "reproduced and audited."),
         ("win-probability", "Chance of winning",
          "The estimated probability that your bid is at or above the next premium, so you would win a COE. "
          "Bidding higher raises your chance but does not change what you pay: every winner pays the premium.",
@@ -163,7 +177,7 @@ def glossary() -> dict[str, dict]:
          "Average interpretable multi-head attention weight per lag (1 = the latest exercise)."),
         ("watchlist", "Watchlist",
          "Targets you're watching, like 'Cat A below $110,000'. After every bidding exercise each one is "
-         "re-scored against the new forecast. You'll see the updated status here the next time you open the app "
+         "re-scored against the new forecast. You'll see the updated status the next time you open COE Compass "
          "– there are no emails or push messages.",
          "Stored in Postgres against a random browser ID; scored with the forecast CDF: the best chance over the "
          "next six exercises of crossing the target."),

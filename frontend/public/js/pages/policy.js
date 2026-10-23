@@ -15,14 +15,9 @@ import { buildHash } from "../route.js";
 import {
   CATEGORY_CODES, catColor, errorBox, exerciseDate, html, money, moneyShort, mount, onSegment, pct, raw, segmented,
 } from "../util.js";
+import { POLICY_SHORT as SHORT } from "./forecast.js";      // short names for the chart markers
 
 const KIND = { step: "Permanent shift", pulse: "One-off shock", temporary: "Temporary shift" };
-// Short names for the chart markers (the timeline shows the full names).
-const SHORT = {
-  mas_loan_curbs_2013: "Loan curbs", cat_a_power_cap_2014: "97kW cap", mas_loan_easing_2016: "Loan easing",
-  zero_growth_2018: "Zero growth", covid_resumption_2020: "Post-lockdown", ev_reclassification_2022: "EV 110kW",
-  cut_and_fill_2023: "Cut-and-fill", quota_injection_2025: "Injection",
-};
 const LIMIT = 60;   // effect bars are drawn on a ±60% scale
 
 /** One sentence a car buyer can read, e.g. "... about 10.8% lower, but not statistically significant". */
@@ -112,8 +107,8 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
   mount(root, html`
     <section class="container page-head page-enter">
       <p class="eyebrow">Policy Lab</p>
-      <h1 class="headline">Every shock, measured.</h1>
-      <p class="subtitle">Box-Tiao intervention analysis ${explain("box-tiao", "Box-Tiao intervention analysis")} separates what a policy did to premiums from the market's usual ups and downs. These estimates feed the forecast as known inputs.</p>
+      <h1 class="headline">What past policies did to premiums.</h1>
+      <p class="subtitle">Loan curbs, category changes and quota injections all moved COE prices. Here each one is measured separately from the market's usual ups and downs ${explain("box-tiao", "Box-Tiao intervention analysis")}, and the estimates feed the forecast.</p>
     </section>
     <section class="container">
       <div class="filters">

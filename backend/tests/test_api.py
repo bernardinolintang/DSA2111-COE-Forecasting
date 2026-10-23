@@ -41,12 +41,18 @@ def test_health(client):
 def test_summary_has_all_categories(client):
     body = client.get("/api/summary").json()
     assert [c["code"] for c in body["categories"]] == ["A", "B", "C", "D", "E"]
-    assert all(c["signal"]["action"] in ("wait", "buy_now") for c in body["categories"])
+    assert body["next_exercise"]["label"] and body["run"]["finished_at"]
     for c in body["categories"]:
         s = c["signal"]
-        assert s["conviction"] in ("high", "medium", "low")
-        assert s["label"] in ("Buy now", "Lean buy", "Wait", "Lean wait")
+        assert s["outlook"] in ("easing", "softer", "steady", "firmer", "rising")
+        assert s["label"] in ("Downward pressure", "Slight downward pressure", "No clear direction",
+                              "Slight upward pressure", "Upward pressure")
+        assert s["uncertainty"] in ("low", "moderate", "high")
         assert s["prob_higher_pct"] == pytest.approx(100 - s["prob_lower_pct"], abs=0.11)
+        assert {d["key"] for d in s["drivers"]} == {"demand", "quota", "uncertainty"}
+        assert c["next_label"] == body["next_exercise"]["label"]
+        assert c["next_q10"] <= c["next_q50"] <= c["next_q90"]
+        assert "buy" not in s["summary"].lower() and "wait" not in s["summary"].lower()
 
 
 def test_recommendation_matches_summary_signal(client):
@@ -54,7 +60,21 @@ def test_recommendation_matches_summary_signal(client):
     cards = {c["code"]: c["signal"] for c in client.get("/api/summary").json()["categories"]}
     for code, signal in cards.items():
         rec = client.get(f"/api/recommendation/{code}").json()
-        assert (rec["action"], rec["label"], rec["conviction"]) == (signal["action"], signal["label"], signal["conviction"])
+        assert {k: rec[k] for k in signal} == signal
+
+
+def test_quota_pct_interpolates_between_modelled_scenarios(client):
+    end = lambda query: client.get(f"/api/forecast/A?{query}").json()["steps"][-1]  # noqa: E731
+    plus10, plus15, plus20 = end("scenario=quota_plus_10"), end("quota_pct=15"), end("scenario=quota_plus_20")
+    assert end("quota_pct=10") == plus10
+    assert plus15["q50"] == pytest.approx((plus10["q50"] + plus20["q50"]) / 2)
+    assert plus15["quota"] == round((plus10["quota"] + plus20["quota"]) / 2)
+    body = client.get("/api/forecast/A?quota_pct=15").json()
+    assert (body["scenario"], body["quota_pct"]) == ("custom", 15)
+    assert client.get("/api/forecast/A?quota_pct=-20").json()["scenario"] == "quota_minus_20"
+    assert client.get("/api/recommendation/A?quota_pct=15").json()["quota_pct"] == 15
+    assert client.get("/api/forecast/A?quota_pct=25").status_code == 422        # never extrapolated
+    assert {s["quota_pct"] for s in client.get("/api/scenarios").json()} == {-20, -10, 0, 10, 20}
 
 
 @pytest.mark.parametrize("scenario", ["base", "quota_plus_20", "quota_minus_20"])
@@ -72,9 +92,10 @@ def test_more_supply_does_not_raise_prices(client):
 
 
 def test_bid_planner_probability_increases_with_bid(client):
-    curve = client.get("/api/bid-planner/A").json()["curve"]
-    probs = [p["probability_pct"] for p in curve]
+    plan = client.get("/api/bid-planner/A").json()
+    probs = [p["probability_pct"] for p in plan["curve"]]
     assert probs == sorted(probs)
+    assert plan["q10"] <= plan["q25"] <= plan["expected_premium"] <= plan["q75"] <= plan["q90"]
 
 
 def test_unknown_category_is_404(client):
@@ -133,7 +154,8 @@ def _ask(client, question, **view):
 
 def test_glossary_and_status(client):
     terms = {t["id"]: t for t in client.get("/api/glossary").json()}
-    assert {"range-80", "significance", "box-tiao", "conviction", "smape", "attention"} <= set(terms)
+    assert {"range-80", "significance", "box-tiao", "outlook", "uncertainty", "pqp", "smape", "attention"} <= set(terms)
+    assert "not advice" in terms["outlook"]["simple"]
     assert client.get("/api/analyst/status").json()["mode"] in ("llm", "offline")
 
 
@@ -164,6 +186,20 @@ def test_analyst_streams_server_sent_events(client):
     done = json.loads(events[-1][1].removeprefix("data: "))
     assert done["actions"][0]["params"] == {"page": "forecast", "category": "E"}
     assert done["mode"] in ("llm", "offline") and done["provenance"]
+
+
+def test_analyst_sees_the_scenario_lab_slider(client):
+    body = _ask(client, "Why is Cat A showing this outlook?", page="scenario", category="A", quota_pct=15).json()
+    assert "+15% supply" in body["provenance"]
+    body = _ask(client, "What if supply rises 15% for Cat B?", page="overview").json()
+    action = [a for a in body["actions"] if a["type"] == "set_supply_scenario"][0]
+    assert action["params"] == {"quota_pct": 15, "category": "B"} and "interpolated" in body["reply"]
+    assert _ask(client, "hi", page="scenario", quota_pct=40).status_code == 422
+
+
+def test_analyst_does_not_tell_people_to_buy_or_wait(client):
+    reply = _ask(client, "Should I buy now or wait?", page="forecast", category="A").json()["reply"]
+    assert "doesn't tell you to buy or to wait" in reply and "Cat A shows" in reply
 
 
 def test_analyst_validates_requests(client):

@@ -1,13 +1,13 @@
-// Acceptance 9 (analyst receives the right context), 10 (navigation actions go
-// to the right place), 11 (persistent actions need confirmation) and 12 (AI
+// Acceptance 9 (Ask Compass receives the right context), 10 (navigation actions
+// go to the right place), 11 (persistent actions need confirmation) and 12 (AI
 // failure does not break the app). The real backend answers in basic mode when
-// no ANTHROPIC_API_KEY is configured; some tests mock the endpoint to exercise
-// the action executor deterministically.
+// no language-model key is configured (or with ANALYST_ENABLED=false); some
+// tests mock the endpoint to exercise the action executor deterministically.
 
 import { expect, test } from "./fixtures.js";
 
 async function ask(page, question) {
-  if (!(await page.locator("#analyst").isVisible())) await page.getByRole("button", { name: "Ask COE Analyst" }).click();
+  if (!(await page.locator("#analyst").isVisible())) await page.locator("#ask-compass").click();
   await page.locator("#analyst-input").fill(question);
   await page.locator("#analyst-input").press("Enter");
 }
@@ -19,19 +19,20 @@ function mockReply(page, body, capture) {
   });
 }
 
-test("the request carries the page, category, scenario and bid being viewed", async ({ page }) => {
+test("the request carries the page, category, quota change and bid being viewed", async ({ page }) => {
   const sent = [];
   await mockReply(page, { reply: "ok" }, sent);
-  await page.goto("/#/forecast/A?scenario=quota_plus_10");
-  await expect(page.locator("#steps tbody tr")).toHaveCount(6);
-  await page.getByRole("button", { name: "Ask COE Analyst" }).click();
-  await expect(page.locator("#analyst-where")).toHaveText("Cat A · Forecast · +10% supply");
-  await expect(page.locator("#analyst-facts")).toContainText("Current premium");
-  await expect(page.locator("#analyst-facts")).toContainText("+10% supply");
-  await ask(page, "Why is this saying Lean buy?");
+  await page.goto("/#/scenario/A?quota=12");
+  await expect(page.locator("#lab-median")).not.toHaveText("—");
+  await page.locator("#ask-compass").click();
+  await expect(page.locator("#analyst-title")).toHaveText("Ask Compass");
+  await expect(page.locator("#analyst-where")).toHaveText("Cat A · Scenario Lab · +12% supply");
+  await expect(page.locator("#analyst-facts")).toContainText("Supply scenario");
+  await expect(page.locator("#analyst-facts")).toContainText("+12% supply (interpolated)");
+  await ask(page, "Why did the forecast change?");
   await expect(page.locator(".msg-bot").last()).toContainText("ok");
-  expect(sent[0].view).toEqual({ page: "forecast", category: "A", scenario: "quota_plus_10" });
-  expect(sent[0].messages.at(-1)).toEqual({ role: "user", content: "Why is this saying Lean buy?" });
+  expect(sent[0].view).toEqual({ page: "scenario", category: "A", quota_pct: 12 });
+  expect(sent[0].messages.at(-1)).toEqual({ role: "user", content: "Why did the forecast change?" });
   expect(sent[0].client_id).toMatch(/^[0-9a-f-]{36}$/);
 
   await page.goto("/#/bid/C?bid=95000");
@@ -39,6 +40,15 @@ test("the request carries the page, category, scenario and bid being viewed", as
   await ask(page, "What are my odds?");
   await expect.poll(() => sent.length).toBe(2);
   expect(sent[1].view).toEqual({ page: "bid", category: "C", bid: 95000 });
+  await expect(page.locator(".msg-bot .reply")).toHaveCount(2);            // answered: ready for the next question
+
+  // Pages without a category send just the page; the suggestions follow the page.
+  await page.goto("/#/learn/faq");
+  await expect(page.locator("#analyst-where")).toHaveText("Learn");
+  await expect(page.locator("#analyst-suggest")).toContainText("What does the 80% range mean?");
+  await ask(page, "hello");
+  await expect.poll(() => sent.length).toBe(3);
+  expect(sent[2].view).toEqual({ page: "learn" });
 });
 
 test("navigation requests open the right page (real backend)", async ({ page }) => {
@@ -57,15 +67,23 @@ test("navigation requests open the right page (real backend)", async ({ page }) 
 });
 
 test("scenario and bid actions change the page in place", async ({ page }) => {
-  await page.goto("/#/forecast/A");
-  await expect(page.locator("#steps tbody tr")).toHaveCount(6);
-  const svg = await page.locator("#fan svg").elementHandle();
+  await page.goto("/#/scenario/A");
+  await expect(page.locator("#lab-median")).not.toHaveText("—");
+  const svg = await page.locator("#lab-fan svg").elementHandle();
   await mockReply(page, { reply: "Switching to +20% supply.",
-    actions: [{ type: "set_supply_scenario", params: { scenario: "quota_plus_20" }, confirm: false, summary: "Supply scenario: +20% supply" }] });
+    actions: [{ type: "set_supply_scenario", params: { scenario: "quota_plus_20", quota_pct: 20 }, confirm: false, summary: "Supply scenario: +20% supply" }] });
   await ask(page, "try more supply");
   await expect(page.getByRole("button", { name: "+20% supply" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator("#steps-sub")).toContainText("+20% supply");
+  await expect(page.locator("#quota-out")).toHaveText("+20%");
   expect(await svg.evaluate((el) => el.isConnected)).toBe(true);          // not re-rendered
+
+  // Any whole percentage works, not only the modelled scenarios.
+  await page.unroute("**/api/analyst/chat*");
+  await mockReply(page, { reply: "Trying 7% less.",
+    actions: [{ type: "set_supply_scenario", params: { quota_pct: -7 }, confirm: false, summary: "Supply scenario: −7% supply" }] });
+  await ask(page, "what about 7% less");
+  await expect(page.locator("#quota-out")).toHaveText("−7%");
+  expect(await svg.evaluate((el) => el.isConnected)).toBe(true);
 
   await page.unroute("**/api/analyst/chat*");
   await mockReply(page, { reply: "Setting your bid.",
@@ -73,6 +91,37 @@ test("scenario and bid actions change the page in place", async ({ page }) => {
   await ask(page, "bid 140k");
   await expect(page).toHaveURL(/#\/bid\/A\?bid=140000/);
   await expect(page.locator("#bid-input")).toHaveValue("140,000");
+});
+
+test("a supply question from another page opens the Scenario Lab at that level", async ({ page }) => {
+  await mockReply(page, { reply: "Opening the Scenario Lab.",
+    actions: [{ type: "set_supply_scenario", params: { quota_pct: 15, category: "B" }, confirm: false, summary: "Supply scenario: +15% supply" }] });
+  await page.goto("/#/forecast/B");
+  await expect(page.locator("#steps tbody tr")).toHaveCount(6);
+  await ask(page, "what if supply rises 15%?");
+  await expect(page).toHaveURL(/#\/scenario\/B\?quota=15$/);
+  await expect(page.locator("#quota-out")).toHaveText("+15%");
+});
+
+test("supply what-ifs through the real backend land in the Scenario Lab", async ({ page, request }) => {
+  const status = await (await request.get("/api/analyst/status")).json();
+  test.skip(status.mode !== "offline", "deterministic wording is only guaranteed in basic mode");
+  await page.goto("/");
+  await ask(page, "What if supply rises 15% for Cat B?");
+  await expect(page).toHaveURL(/#\/scenario\/B\?quota=15$/);
+  await expect(page.locator(".msg-bot").last()).toContainText("interpolated");
+  await expect(page.locator(".msg-bot .provenance").last()).toContainText("bidding exercise");
+});
+
+test("Compass does not tell anyone to buy or to wait (real backend, basic mode)", async ({ page, request }) => {
+  const status = await (await request.get("/api/analyst/status")).json();
+  test.skip(status.mode !== "offline", "deterministic wording is only guaranteed in basic mode");
+  await page.goto("/#/forecast/A");
+  await expect(page.locator("#steps tbody tr")).toHaveCount(6);
+  await ask(page, "Should I buy now or wait?");
+  const reply = page.locator(".msg-bot .reply").last();
+  await expect(reply).toContainText("doesn't tell you to buy or to wait");
+  await expect(reply).toContainText("Cat A shows");
 });
 
 test("watchlist changes are only drafted until the user confirms (real backend)", async ({ page, request }) => {
@@ -100,15 +149,15 @@ test("cancelling a drafted watch saves nothing", async ({ page, request }) => {
   expect(await (await request.get(`/api/alerts?client_id=${cid}`)).json()).toEqual([]);
 });
 
-test("if the analyst is down, the panel says so and the app keeps working", async ({ page, problems }) => {
+test("if Compass is down, the panel says so and the app keeps working", async ({ page, problems }) => {
   await page.route("**/api/analyst/chat*", (route) => route.abort("failed"));
   await page.goto("/#/forecast/A");
   await ask(page, "What does the 80% range mean?");
   await expect(page.locator(".msg-bot.is-error")).toContainText("isn't available right now");
   await expect(page.locator(".msg-bot.is-error").getByRole("button", { name: "Try again" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Close the analyst" }).click();
-  await page.locator('a[data-nav="bid"]').click();
+  await page.getByRole("button", { name: "Close Ask Compass" }).click();
+  await page.getByRole("link", { name: "Plan your bid" }).click();
   await expect(page.locator("#cdf svg .series-line")).toHaveCount(1);
   // The only errors allowed are the ones for the request we deliberately failed.
   expect(problems.filter((p) => !p.includes("/api/analyst/chat") && !p.includes("net::ERR_FAILED"))).toEqual([]);
@@ -119,28 +168,35 @@ test("if the analyst is down, the panel says so and the app keeps working", asyn
   await expect(page.locator(".msg-bot.is-error").last()).toContainText("Internal error");
 });
 
-test("explain popover works without the AI and can hand over to the analyst", async ({ page }) => {
+test("explain popover works without the AI and can hand over to Compass", async ({ page }) => {
   const sent = [];
   await mockReply(page, { reply: "Here's what the 80% range means for Cat A." }, sent);
   await page.goto("/#/forecast/A");
-  await page.getByRole("button", { name: "Explain: 80% range" }).click();
+  await page.locator("#chart-card").getByRole("button", { name: "Explain: 80% range" }).click();
   const pop = page.locator(".popover");
   await expect(pop).toContainText("8 times out of 10");
   await pop.getByText("Technical detail").click();
   await expect(pop).toContainText("p10–p90");
-  await pop.getByRole("button", { name: /Ask the analyst/ }).click();
+  await pop.getByRole("button", { name: /Ask Compass about this/ }).click();
   await expect(page.locator(".msg-bot").last()).toContainText("80% range");
   expect(sent[0].messages.at(-1).content).toContain("80% range");
 });
 
+test("the outlook and uncertainty are explained in place", async ({ page }) => {
+  await page.goto("/#/forecast/A");
+  await page.locator("#advice").getByRole("button", { name: "Explain: market outlook" }).click();
+  const pop = page.locator(".popover");
+  await expect(pop).toContainText("It is not advice to buy or to wait");
+  await page.keyboard.press("Escape");
+  await page.locator("#advice").getByRole("button", { name: "Explain: model uncertainty" }).click();
+  await expect(pop).toContainText("How wide the forecast's 80% range is");
+});
+
 test("shows a thinking state, then the answer as it arrives (no typewriter)", async ({ page }) => {
-  const long = "The model's median for Cat A is flat, so waiting is unlikely to save much. ".repeat(12).trim();
+  const long = "The model's median for Cat A is flat, so no clear direction is the honest reading. ".repeat(12).trim();
   await page.route("**/api/analyst/chat*", async (route) => {
     await new Promise((r) => setTimeout(r, 700));             // the model is "thinking"
-    const sse = (event, data) => `event: ${event}
-data: ${JSON.stringify(data)}
-
-`;
+    const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
     await route.fulfill({
       status: 200, headers: { "content-type": "text/event-stream" },
       body: sse("status", { text: "Thinking…" }) + sse("delta", { text: long })
@@ -148,7 +204,7 @@ data: ${JSON.stringify(data)}
     });
   });
   await page.goto("/");
-  await ask(page, "Why do all categories say Lean buy?");
+  await ask(page, "Why do all categories show the same outlook?");
   const thinking = page.locator(".bubble.thinking");
   await expect(thinking).toBeVisible();
   await expect(thinking).toContainText("Thinking…");
@@ -165,21 +221,22 @@ test("the real backend streams the answer as server-sent events", async ({ page 
   await page.goto("/#/forecast/A");
   const [res] = await Promise.all([
     page.waitForResponse((r) => r.url().includes("/api/analyst/chat")),
-    ask(page, "Why is Cat A saying Lean buy?"),
+    ask(page, "Why is Cat A showing no clear direction?"),
   ]);
   expect(res.headers()["content-type"]).toContain("text/event-stream");
   await expect(page.locator(".msg-bot .provenance").last()).toContainText("Cat A forecast");
 });
 
-test("starting the tour moves the analyst out of the way", async ({ page }) => {
+test("starting the tour moves Ask Compass out of the way", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Ask COE Analyst" }).click();
+  await page.locator("#ask-compass").click();
   await expect(page.locator("#analyst")).toBeVisible();
   await page.getByRole("button", { name: "Help" }).click();               // header stays reachable
   await page.getByRole("menuitem", { name: /Take the 2-minute tour/ }).click();
   await expect(page.locator(".tour-card")).toBeVisible();
   await expect(page.locator("#analyst")).toBeHidden();
-  await expect(page.locator(".analyst-fab")).toBeHidden();
   await page.keyboard.press("Escape");
-  await expect(page.locator(".analyst-fab")).toBeVisible();
+  await expect(page.locator(".tour-card")).toHaveCount(0);
+  await page.locator("#ask-compass").click();                             // usable again once the tour ends
+  await expect(page.locator("#analyst")).toBeVisible();
 });

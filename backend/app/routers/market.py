@@ -13,7 +13,7 @@ from ..db import get_connection
 from ..labels import CATEGORIES
 from ..schemas import Category, History, Summary
 from ..services import repository as repo
-from ..services.recommendation import advise
+from ..services.recommendation import advise, signal
 from .common import require_category, with_label
 
 router = APIRouter(tags=["market"])
@@ -26,7 +26,7 @@ def categories():
 
 @router.get("/summary", response_model=Summary)
 def summary(conn: Connection = Depends(get_connection)):
-    """Everything the home dashboard needs in a single request."""
+    """Everything the home page and the market status bar need in a single request."""
     run = repo.latest_run(conn)
     recent = defaultdict(list)
     for row in repo.latest_exercises(conn, n=25):
@@ -37,7 +37,7 @@ def summary(conn: Connection = Depends(get_connection)):
         for row in repo.forecasts_all(conn, run["id"]):
             forecasts[row["category"]].append(row)
 
-    cards, data_through = [], None
+    cards, data_through, next_exercise = [], None, None
     for code, meta in CATEGORIES.items():
         rows = recent.get(code)
         if not rows:
@@ -53,23 +53,21 @@ def summary(conn: Connection = Depends(get_connection)):
             "change_pct": (latest["premium"] / previous["premium"] - 1) * 100 if previous else None,
             "year_ago_pct": (latest["premium"] / year_ago - 1) * 100 if year_ago else None,
             "sparkline": [r["premium"] for r in reversed(rows)],
-            "next_q50": None, "horizon_q10": None, "horizon_q50": None, "horizon_q90": None,
+            "next_label": None, "next_q10": None, "next_q50": None, "next_q90": None,
+            "horizon_q10": None, "horizon_q50": None, "horizon_q90": None,
             "horizon_label": None, "signal": None,
         }
         steps = forecasts.get(code)
         if steps:
             advice = advise(meta["name"], latest["premium"], steps, list(reversed(rows)), settings.wait_threshold)
+            next_exercise = next_exercise or with_label(steps[0])
             card.update(
-                next_q50=steps[0]["q50"], horizon_q10=advice.horizon_q10, horizon_q50=advice.horizon_q50,
-                horizon_q90=advice.horizon_q90, horizon_label=advice.horizon_label,
-                signal={"action": advice.action, "headline": advice.headline, "label": advice.label,
-                        "conviction": advice.conviction,
-                        "expected_change_pct": advice.expected_change_pct,
-                        "prob_lower_pct": advice.prob_lower_pct, "prob_higher_pct": advice.prob_higher_pct,
-                        "prob_save_pct": advice.prob_save_pct},
+                next_label=advice.next_label, next_q10=advice.next_q10, next_q50=advice.next_q50,
+                next_q90=advice.next_q90, horizon_q10=advice.horizon_q10, horizon_q50=advice.horizon_q50,
+                horizon_q90=advice.horizon_q90, horizon_label=advice.horizon_label, signal=signal(advice),
             )
         cards.append(card)
-    return {"run": run, "data_through": data_through, "categories": cards}
+    return {"run": run, "data_through": data_through, "next_exercise": next_exercise, "categories": cards}
 
 
 @router.get("/history/{category}", response_model=History)

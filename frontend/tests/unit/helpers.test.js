@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { formatReply } from "../../public/js/analyst.js";
 import { plainEffect } from "../../public/js/pages/policy.js";
-import { buildHash, parseHash } from "../../public/js/route.js";
+import { buildHash, clampQuota, parseHash, scenarioPct } from "../../public/js/route.js";
 import { STEPS } from "../../public/js/tour.js";
 import { money, moneyShort, number, parseMoney, pct } from "../../public/js/util.js";
 
@@ -51,6 +51,20 @@ test("hash routes round-trip with categories and query parameters", () => {
   assert.deepEqual(parseHash(h).query, { event: "quota_injection_2025" });
 });
 
+test("supply what-ifs route to the Scenario Lab; Learn sections live in the path", () => {
+  assert.equal(buildHash({ page: "scenario", category: "A", quota: 12 }), "#/scenario/A?quota=12");
+  assert.equal(buildHash({ page: "scenario", category: "A", quota: 0 }), "#/scenario/A");
+  assert.equal(buildHash({ page: "scenario", category: "B", scenario: "quota_minus_10" }), "#/scenario/B?quota=-10");
+  assert.equal(buildHash({ page: "forecast", category: "A", scenario: "quota_plus_10" }), "#/scenario/A?quota=10");   // old links follow
+  assert.deepEqual(["base", "quota_plus_20", "quota_minus_10", "nope", undefined].map(scenarioPct), [0, 20, -10, null, null]);
+  assert.deepEqual([12.4, "15", 99, -99, "abc", null].map(clampQuota), [12, 15, 20, -20, 0, 0]);
+  assert.equal(buildHash({ page: "learn" }), "#/learn");
+  assert.equal(buildHash({ page: "learn", section: "how" }), "#/learn/how");
+  assert.equal(buildHash({ page: "model", section: "technical" }), "#/model?section=technical");
+  assert.equal(buildHash({ page: "plan", intent: "renew" }), "#/plan?intent=renew");
+  assert.equal(parseHash("#/scenario/C?quota=-10").category, "C");
+});
+
 test("policy effects read as plain English, including non-significance", () => {
   assert.equal(plainEffect({ category: "A", pct_effect: -10.8, significant: false }, "step"),
     "The model estimates Cat A premiums were about 10.8% lower after this change, but the effect is not statistically significant — it could plausibly be zero.");
@@ -66,6 +80,6 @@ test("analyst replies are escaped before formatting", () => {
 
 test("the tour has seven steps, each with a page, an anchor and copy", () => {
   assert.equal(STEPS.length, 7);
-  assert.deepEqual(STEPS.map((s) => s.page), ["overview", "forecast", "forecast", "bid", "policy", "model", "alerts"]);
+  assert.deepEqual(STEPS.map((s) => s.page), ["overview", "forecast", "scenario", "bid", "policy", "model", "alerts"]);
   for (const s of STEPS) assert.ok(s.anchor && s.title && s.body.length > 40);
 });

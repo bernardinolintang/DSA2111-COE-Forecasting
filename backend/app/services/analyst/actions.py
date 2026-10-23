@@ -15,14 +15,15 @@ from dataclasses import dataclass
 
 from ...glossary import glossary
 from ...labels import CATEGORIES, SCENARIOS
+from .. import scenarios as sc
 from .context import PAGES
 
 CATS = list(CATEGORIES)
 HIGHLIGHTS = {
     "category-cards": "the five category cards",
     "forecast-chart": "the premium & forecast chart",
-    "recommendation": "the recommendation card",
-    "scenario-picker": "the supply scenario picker",
+    "recommendation": "the market outlook card",
+    "scenario-picker": "the supply slider",
     "forecast-table": "the next six exercises table",
     "bid-chart": "the chance-of-winning chart",
     "bid-suggestions": "the suggested reserve prices",
@@ -63,15 +64,17 @@ UI_TOOLS = [
     {
         "name": "navigate",
         "description": "Open a page of the app, optionally for a category. Use when the user asks to see or go "
-                       "somewhere, or when showing a page clearly helps them. Pages: overview, forecast, bid "
-                       "(bid planner), policy (Policy Lab), model (accuracy/methodology), alerts (watchlist).",
+                       "somewhere, or when showing a page clearly helps them. Pages: overview, forecast, "
+                       "scenario (Scenario Lab: supply what-ifs), bid (bid planner), plan (My plan), policy "
+                       "(Policy Lab), model (model performance), alerts (watchlist), learn (COE guide, how the "
+                       "forecasts are made, FAQ, data sources).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "page": {"type": "string", "enum": list(PAGES)},
                 "category": _cat,
                 "scenario": {"type": "string", "enum": list(SCENARIOS),
-                             "description": "Supply scenario, forecast page only."},
+                             "description": "Supply scenario, scenario page only."},
                 "bid": {"type": "number", "description": "Bid amount in SGD, bid page only."},
                 "event": {"type": "string", "description": "Policy event code to highlight, policy page only."},
             },
@@ -81,11 +84,13 @@ UI_TOOLS = [
     },
     {
         "name": "set_supply_scenario",
-        "description": "Switch the forecast's next-quarter supply scenario (opens the forecast page if needed).",
+        "description": "Set the Scenario Lab's next-quarter supply change (opens the Scenario Lab if needed). "
+                       "Give either a modelled scenario or quota_pct (whole percent, -20 to 20).",
         "input_schema": {
             "type": "object",
-            "properties": {"scenario": {"type": "string", "enum": list(SCENARIOS)}, "category": _cat},
-            "required": ["scenario"],
+            "properties": {"scenario": {"type": "string", "enum": list(SCENARIOS)},
+                           "quota_pct": {"type": "integer", "minimum": sc.MIN_PCT, "maximum": sc.MAX_PCT},
+                           "category": _cat},
             "additionalProperties": False,
         },
     },
@@ -111,8 +116,8 @@ UI_TOOLS = [
     },
     {
         "name": "open_tutorial",
-        "description": "Start the guided tour of the app (steps 1-7: overview, forecast, supply scenarios, bid "
-                       "planner, policy lab, model, watchlist).",
+        "description": "Start the guided tour of the app (steps 1-7: overview, forecast, Scenario Lab, bid "
+                       "planner, policy lab, model performance, watchlist).",
         "input_schema": {
             "type": "object",
             "properties": {"step": {"type": "integer", "minimum": 1, "maximum": 7}},
@@ -172,11 +177,14 @@ DATA_TOOLS = [
     },
     {
         "name": "scenario_forecast",
-        "description": "Forecast (next six exercises) and recommendation for a category under a supply scenario.",
+        "description": "Forecast (next six exercises) and market outlook for a category under a supply "
+                       "scenario: a modelled scenario, or quota_pct (whole percent, -20 to 20; interpolated "
+                       "between modelled scenarios).",
         "input_schema": {
             "type": "object",
-            "properties": {"category": _cat, "scenario": {"type": "string", "enum": list(SCENARIOS)}},
-            "required": ["category", "scenario"],
+            "properties": {"category": _cat, "scenario": {"type": "string", "enum": list(SCENARIOS)},
+                           "quota_pct": {"type": "integer", "minimum": sc.MIN_PCT, "maximum": sc.MAX_PCT}},
+            "required": ["category"],
             "additionalProperties": False,
         },
     },
@@ -245,6 +253,21 @@ def _amount(value, what="amount") -> int:
     return int(round(v))
 
 
+def quota_pct(p: dict) -> int:
+    """The quota change a scenario request asks for: ``quota_pct`` if given, else ``scenario``."""
+    if p.get("quota_pct") is not None:
+        try:
+            pct = int(p["quota_pct"])
+        except (TypeError, ValueError):
+            raise ActionError("quota_pct must be a whole number.") from None
+        if not sc.MIN_PCT <= pct <= sc.MAX_PCT:
+            raise ActionError(f"quota_pct must be between {sc.MIN_PCT} and {sc.MAX_PCT}.")
+        return pct
+    if p.get("scenario") not in SCENARIOS:
+        raise ActionError("Unknown scenario.")
+    return sc.PCT_OF[p["scenario"]]
+
+
 def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> Action:
     """``alerts``: the viewer's watchlist by id, used to check removal requests."""
     p = dict(params or {})
@@ -252,11 +275,13 @@ def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> 
         page = p.get("page")
         if page not in PAGES:
             raise ActionError(f"Unknown page {page!r}.")
+        if page == "forecast" and p.get("scenario") not in (None, "base"):
+            page = "scenario"                 # supply what-ifs live in the Scenario Lab
         out = {"page": page}
         cat = _category(p.get("category"), required=False)
-        if cat and page in ("forecast", "bid", "policy"):
+        if cat and page in ("forecast", "scenario", "bid", "policy"):
             out["category"] = cat
-        if page == "forecast" and p.get("scenario"):
+        if page == "scenario" and p.get("scenario"):
             if p["scenario"] not in SCENARIOS:
                 raise ActionError("Unknown scenario.")
             out["scenario"] = p["scenario"]
@@ -268,13 +293,14 @@ def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> 
         return Action("navigate", out, False, f"Open {where}")
 
     if name == "set_supply_scenario":
-        if p.get("scenario") not in SCENARIOS:
-            raise ActionError("Unknown scenario.")
-        out = {"scenario": p["scenario"]}
+        pct = quota_pct(p)
+        out = {"quota_pct": pct}
+        if sc.scenario_id(pct):
+            out["scenario"] = sc.scenario_id(pct)
         cat = _category(p.get("category"), required=False)
         if cat:
             out["category"] = cat
-        return Action(name, out, False, f"Supply scenario: {SCENARIOS[p['scenario']]['label']}")
+        return Action(name, out, False, f"Supply scenario: {sc.label(pct)}")
 
     if name == "set_bid_amount":
         out = {"amount": _amount(p.get("amount"), "bid")}

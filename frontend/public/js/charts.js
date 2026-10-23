@@ -219,7 +219,9 @@ const opacityAttr = (a) => (a < 0.995 ? ` opacity="${Math.max(0, a).toFixed(3)}"
 // ---------------------------------------------------------------------------
 /**
  * opts:
- *  series:  [{ key, label, color, points: [{x, y}], width?, endDot? }]
+ *  series:  [{ key, label, color, points: [{x, y}], width?, endDot?, dash? }]   dash: e.g. "7 5" for a forecast
+ *  xMarks:  [x]                       small ticks on the baseline (e.g. upcoming bidding exercises)
+ *  startZoomed: true to open on the `focus` range instead of everything
  *  bands:   [{ key, color, opacity, points: [{x, lo, hi}] }]
  *  markers: [{ x, label, active? }]   vertical hairlines (e.g. policy events)
  *  regions: [{ x0, x1 }]              shaded x-ranges (e.g. a selected policy period)
@@ -258,7 +260,7 @@ export function lineChart(container, opts) {
 
   function configure(next) {
     o = { height: 320, xType: "time", yFormat: String, xFormat: String, series: [], bands: [],
-          markers: [], regions: [], points: [], label: "Chart", emptyText: "No data to show", ...next };
+          markers: [], regions: [], points: [], xMarks: [], label: "Chart", emptyText: "No data to show", ...next };
     svg.setAttribute("aria-label", o.label);
     xsAll = [...new Set([
       ...o.series.flatMap((s) => s.points.map((p) => toNum(p.x))),
@@ -277,7 +279,7 @@ export function lineChart(container, opts) {
     const compact = W < 520;
     const [vx0, vx1] = view ?? [xsAll[0], xsAll[xsAll.length - 1]];
     const series = o.series.map((s) => ({
-      key: s.key, color: s.color, width: s.width || 2, endDot: s.endDot, a: 1,
+      key: s.key, color: s.color, width: s.width || 2, endDot: s.endDot, dash: s.dash || null, a: 1,
       pts: s.points.filter((p) => p.y != null && Number.isFinite(p.y)).map((p) => [toNum(p.x), p.y]),
     }));
     const bands = o.bands.map((b) => ({
@@ -350,6 +352,11 @@ export function lineChart(container, opts) {
       parts.push(`<text x="${x(t.value).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(t.label)}</text>`);
     }
     parts.push(`<line class="baseline" x1="${m.left}" x2="${W - m.right}" y1="${H - m.bottom + 0.5}" y2="${H - m.bottom + 0.5}"/>`);
+    // Subtle ticks on the baseline, one per forecast bidding exercise.
+    for (const xv of o.xMarks) {
+      const tx = Math.round(x(toNum(xv))) + 0.5;
+      if (tx >= m.left && tx <= W - m.right) parts.push(`<line class="x-mark" x1="${tx}" x2="${tx}" y1="${H - m.bottom - 5}" y2="${H - m.bottom}"/>`);
+    }
 
     parts.push(`<g clip-path="url(#${clipId})">`);
     for (const r of F.regions) {
@@ -395,7 +402,8 @@ export function lineChart(container, opts) {
       const pts = s.pts.map((p) => [x(p[0]), y(p[1])]);
       const op = opacityAttr(s.a);
       if (pts.length > 1) {
-        parts.push(`<path class="series-line" d="${path(pts)}" stroke="${s.color}" stroke-width="${s.width}"${op}/>`);
+        const dash = s.dash ? ` stroke-dasharray="${s.dash}"` : "";
+        parts.push(`<path class="series-line" d="${path(pts)}" stroke="${s.color}" stroke-width="${s.width}"${dash}${op}/>`);
       }
       if (s.endDot && pts.length) {
         const [ex, ey] = pts[pts.length - 1];
@@ -604,6 +612,7 @@ export function lineChart(container, opts) {
       if (b.dataset.zoom === "reset") zoomTo(null, DURATION.route);
       else if (o.focus) zoomTo(clampView(toNum(o.focus.x0), toNum(o.focus.x1)), DURATION.route);
     });
+    if (o.focus && o.startZoomed) view = clampView(toNum(o.focus.x0), toNum(o.focus.x1));
     paintZoom();
   }
   draw(true);                                 // synchronous first paint
@@ -769,9 +778,9 @@ export function sparkline(values, forecast = [], { width = 220, height = 44 } = 
   const fut = [hist[hist.length - 1], ...forecast.map((v, i) => [x(values.length + i), y(v)])];
   const [ex, ey] = hist[hist.length - 1];
   return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" preserveAspectRatio="none" aria-hidden="true">
-    <path d="${path(hist)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
-    ${forecast.length ? `<path d="${path(fut)}" fill="none" stroke="var(--accent)" stroke-opacity="0.35" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : ""}
-    <circle cx="${ex}" cy="${ey}" r="3.5" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"/>
+    <path d="${path(hist)}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+    ${forecast.length ? `<path d="${path(fut)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>` : ""}
+    <circle cx="${ex}" cy="${ey}" r="3.5" fill="var(--ink)" stroke="var(--surface)" stroke-width="2"/>
   </svg>`;
 }
 

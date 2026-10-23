@@ -72,7 +72,8 @@ class ForecastStep(Exercise):
 
 class Forecast(BaseModel):
     category: CategoryCode
-    scenario: str
+    scenario: str                      # a modelled scenario id, or "custom" for an interpolated point
+    quota_pct: int = 0                 # next quarter's quota change, percent
     run: RunInfo
     origin: HistoryPoint
     steps: list[ForecastStep]
@@ -82,21 +83,35 @@ class Scenario(BaseModel):
     id: str
     label: str
     multiplier: float
+    quota_pct: int
     description: str
 
 
-Conviction = Literal["high", "medium", "low"]
+Outlook = Literal["easing", "softer", "steady", "firmer", "rising"]
+
+
+class Driver(BaseModel):
+    key: Literal["demand", "quota", "uncertainty"]
+    title: str
+    trend: str                         # up | down | flat, or the uncertainty level
+    value: float
+    text: str
 
 
 class Signal(BaseModel):
-    action: Literal["wait", "buy_now"]
-    headline: str
+    """The market outlook: which way the forecast leans and how clearly. Not advice."""
+    outlook: Outlook
     label: str
-    conviction: Conviction
+    direction: Literal["down", "flat", "up"]
+    strength: Literal["strong", "slight", "none"]
+    summary: str
     expected_change_pct: float
     prob_lower_pct: float
     prob_higher_pct: float
-    prob_save_pct: float
+    prob_drop_pct: float
+    uncertainty: Literal["low", "moderate", "high"]
+    uncertainty_pct: float
+    drivers: list[Driver]
 
 
 class CategorySummary(Category):
@@ -106,7 +121,10 @@ class CategorySummary(Category):
     change_pct: float | None
     year_ago_pct: float | None
     sparkline: list[int]
+    next_label: str | None
+    next_q10: float | None
     next_q50: float | None
+    next_q90: float | None
     horizon_q10: float | None
     horizon_q50: float | None
     horizon_q90: float | None
@@ -117,23 +135,20 @@ class CategorySummary(Category):
 class Summary(BaseModel):
     run: RunInfo | None
     data_through: Exercise | None
+    next_exercise: Exercise | None
     categories: list[CategorySummary]
 
 
-class Recommendation(BaseModel):
+class Recommendation(Signal):
     category: CategoryCode
     scenario: str
-    action: Literal["wait", "buy_now"]
-    headline: str
-    label: str
-    conviction: Conviction
-    summary: str
-    expected_change_pct: float
-    prob_lower_pct: float
-    prob_higher_pct: float
-    prob_save_pct: float
-    confidence_pct: float
+    quota_pct: int = 0
+    meaningful_drop: bool
     current: float
+    next_label: str
+    next_q10: float
+    next_q50: float
+    next_q90: float
     horizon_label: str
     horizon_q10: float
     horizon_q50: float
@@ -160,6 +175,10 @@ class BidPlan(BaseModel):
     bid: float
     win_probability_pct: float
     expected_premium: float
+    q10: float
+    q25: float
+    q75: float
+    q90: float
     suggestions: list[BidSuggestion]
     curve: list[BidPoint]
 
@@ -254,9 +273,10 @@ class ChatTurn(BaseModel):
 
 class AnalystView(BaseModel):
     """Where the viewer is. Only identifiers: the numbers are re-read on the server."""
-    page: Literal["overview", "forecast", "bid", "policy", "model", "alerts"] = "overview"
+    page: Literal["overview", "forecast", "scenario", "bid", "plan", "policy", "model", "alerts", "learn"] = "overview"
     category: CategoryCode | None = None
     scenario: Literal["base", "quota_minus_20", "quota_minus_10", "quota_plus_10", "quota_plus_20"] | None = None
+    quota_pct: int | None = Field(default=None, ge=-20, le=20)       # the Scenario Lab slider
     bid: float | None = Field(default=None, gt=0, lt=10_000_000)
     event: str | None = Field(default=None, max_length=64)
 

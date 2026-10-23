@@ -13,17 +13,17 @@ export const TOUR_SEEN = "coe-tour-seen";
 
 export const STEPS = [
   { page: "overview", anchor: "category-cards", title: "Today's market",
-    body: "Each card shows today's premium for one COE category and our signal for the next quota quarter. Start here to see whether prices are expected to rise or fall — and how confident that call is." },
+    body: "Each card shows today's premium for one COE category, the forecast for the next exercise with its likely range, and the market outlook: which way the forecast leans, and why." },
   { page: "forecast", category: "A", anchor: "forecast-chart", title: "Read a forecast",
-    body: "The dark line is the actual premium. The blue line is the median forecast — the middle estimate. The darker band is the 50% range and the lighter band the 80% range: a wider band means more uncertainty." },
-  { page: "forecast", category: "A", anchor: "scenario-picker", title: "Test supply scenarios",
-    body: "LTA decides how many COEs to release. See how the forecast changes if next quarter's quota is 10–20% higher or lower than today. More supply usually means lower premiums." },
+    body: "The solid line is the recorded premium. The dashed line is the median forecast, the middle estimate. The darker band is the 50% range and the lighter band the 80% range: a wider band means more uncertainty." },
+  { page: "scenario", category: "A", anchor: "scenario-picker", title: "Test supply scenarios",
+    body: "LTA decides how many COEs to release. Drag the slider to see how the forecast responds if next quarter's quota is up to 20% higher or lower than today. More supply usually means lower premiums." },
   { page: "bid", category: "A", anchor: "bid-planner", title: "Plan a bid",
     body: "Move the slider or type a bid to see the estimated chance of winning the next exercise. Everyone who wins pays the same premium, so bidding higher only buys certainty." },
   { page: "policy", category: "B", anchor: "policy-events", title: "Understand why",
-    body: "See how past policy changes — loan curbs, quota injections, EV rules — moved each category's premiums. Each event says in plain words what the estimate means, with the statistics one click away." },
+    body: "See how past policy changes (loan curbs, quota injections, EV rules) moved each category's premiums. Each event says in plain words what the estimate means, with the statistics one click away." },
   { page: "model", anchor: "model-summary", title: "Why trust the model?",
-    body: "We show how accurate the forecasts were on three years of auctions the model never saw, compared with simpler methods — including where it struggles." },
+    body: "We show how accurate the forecasts were on three years of auctions the model never saw, compared with simpler methods, including where it struggles." },
   { page: "alerts", anchor: "watchlist-form", title: "Watch a target",
     body: "Save the premium you're waiting for. Each target is re-scored after every bidding exercise, and we flag changes the next time you open the app." },
 ];
@@ -113,7 +113,7 @@ async function show(i) {
         ? '<button type="button" class="btn btn-sm" data-tour="next">Next</button>'
         : '<button type="button" class="btn btn-sm" data-tour="finish">Finish</button>'}
     </div>
-    ${i === STEPS.length - 1 ? `<button type="button" class="btn btn-ghost btn-sm mt-16 tour-ask" data-tour="ask">${ICONS.sparkle}Finish and ask the COE Analyst anything</button>` : ""}
+    ${i === STEPS.length - 1 ? `<button type="button" class="btn btn-ghost btn-sm mt-16 tour-ask" data-tour="ask">${ICONS.sparkle}Finish and ask Compass anything</button>` : ""}
     <p class="visually-hidden" aria-live="polite">Step ${i + 1} of ${STEPS.length}: ${esc(step.title)}</p>`;
   card.querySelectorAll(".tour-title, .tour-body").forEach((el) => enter(el, { rise: 4, duration: DURATION.tab }));
   state.target = null;
@@ -126,7 +126,7 @@ async function show(i) {
   if (target) {
     // Scroll only when the target is not already fully in view (below the sticky header).
     const r = target.getBoundingClientRect();
-    const inView = r.top >= 60 && r.bottom <= window.innerHeight - 8;
+    const inView = r.top >= 100 && r.bottom <= window.innerHeight - 8;
     if (!inView) target.scrollIntoView({ block: target.offsetHeight > window.innerHeight * 0.6 ? "start" : "center", behavior: "instant" });
   }
   place();
@@ -211,7 +211,7 @@ export function offerTour() {
   el.className = "tour-offer";
   el.setAttribute("role", "region");
   el.setAttribute("aria-label", "Take a tour");
-  el.innerHTML = `<div><strong>New to COE Forecast?</strong><div class="small muted">Take a 2-minute tour of what everything means.</div></div>
+  el.innerHTML = `<div><strong>New to COE Compass?</strong><div class="small muted">Take a 2-minute tour of what everything means.</div></div>
     <div class="row"><button type="button" class="btn btn-sm" data-offer="start">Take the tour</button>
     <button type="button" class="btn btn-ghost btn-sm" data-offer="dismiss">Not now</button></div>`;
   el.addEventListener("click", (e) => {

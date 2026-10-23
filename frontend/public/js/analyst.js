@@ -1,7 +1,9 @@
-// COE Analyst: a side panel that explains what the viewer is looking at.
+// Ask Compass: a side panel that explains what the viewer is looking at. It is
+// opened from the header on every page, so it is part of the app rather than a
+// separate chatbot page.
 //
-// * Context: the current page publishes identifiers (page, category, scenario,
-//   bid, event) via context.js; the server rebuilds the numbers from the
+// * Context: the current page publishes identifiers (page, category, quota
+//   change, bid, event) via context.js; the server rebuilds the numbers from the
 //   database. The header shows the page's own facts so the viewer can see what
 //   the analyst is looking at.
 // * Actions: the server returns validated actions from a fixed whitelist. Safe
@@ -13,30 +15,35 @@
 import { api } from "./api.js";
 import { getView, onView, pageAction } from "./context.js";
 import { DURATION, EASING, enter, reducedMotion } from "./motion.js";
-import { buildHash, parseHash } from "./route.js";
+import { buildHash, clampQuota, parseHash, scenarioPct } from "./route.js";
+import { scenarioLabel } from "./forecast-math.js";
 import { startTour } from "./tour.js";
 import { ICONS, clientId, esc, html, money, raw, toast } from "./util.js";
 
 const THREAD_KEY = "coe-analyst-thread";
 const MAX_TURNS_SENT = 12;
 const TIMEOUT_MS = 75_000;
-const PAGE_NAMES = { overview: "Overview", forecast: "Forecast", bid: "Bid planner", policy: "Policy Lab", model: "Model", alerts: "Watchlist" };
-const SCENARIO_NAMES = { base: "As announced", quota_minus_20: "−20% supply", quota_minus_10: "−10% supply", quota_plus_10: "+10% supply", quota_plus_20: "+20% supply" };
+const PAGE_NAMES = { overview: "Overview", forecast: "Forecast", scenario: "Scenario Lab", bid: "Bid planner", plan: "My plan",
+                     policy: "Policy Lab", model: "Model performance", alerts: "Watchlist", learn: "Learn" };
 const HIGHLIGHT = {
   "category-cards": "category-cards", "forecast-chart": "forecast-chart", recommendation: "recommendation",
   "scenario-picker": "scenario-picker", "forecast-table": "forecast-table", "bid-chart": "bid-chart",
+  "scenario-chart": "scenario-chart",
   "bid-suggestions": "bid-suggestions", "policy-chart": "policy-chart", "policy-events": "policy-events",
   "model-summary": "model-summary", leaderboard: "leaderboard", "error-by-horizon": "error-by-horizon",
   "watchlist-form": "watchlist-form",
 };
 
 const SUGGESTIONS = {
-  overview: ["Explain this page like I'm buying my first car", "Why do all categories say Lean buy?", "What's the difference between Cat A and Cat B?"],
-  forecast: ["Why is this saying {label}?", "What does the 80% range mean?", "How certain is this forecast?", "What if supply rises 10%?"],
+  overview: ["Explain this page like I'm buying my first car", "Why do all categories show the same outlook?", "What's the difference between Cat A and Cat B?"],
+  forecast: ["Why is this showing {label}?", "Explain this chart simply", "How certain is this forecast?", "What if supply rises 10%?"],
+  scenario: ["Why did the forecast change?", "What if supply rises 15%?", "Does an increase in quota usually reduce premiums?"],
   bid: ["How much should I bid for a 90% chance?", "Why does a higher bid not cost more?", "What does chance of winning mean?"],
+  plan: ["Explain my plan simply", "What does PQP mean?", "Alert me when Cat {cat} falls below $120k"],
   policy: ["What changed Cat {cat} prices the most?", "What does n.s. mean?", "Does an increase in quota usually reduce premiums?"],
   model: ["Why should I trust this model?", "Why is the model less certain further ahead?", "What is sMAPE?"],
   alerts: ["Alert me when Cat A falls below $120k", "How does the watchlist tell me about changes?"],
+  learn: ["Explain COE like I'm buying my first car", "What does the 80% range mean?", "Compare Cat A and Cat B"],
 };
 
 let panel = null;
@@ -72,9 +79,9 @@ export function formatReply(text) {
 }
 
 function describeView(v) {
-  const bits = [PAGE_NAMES[v.page] || "COE Forecast"];
+  const bits = [PAGE_NAMES[v.page] || "COE Compass"];
   if (v.category) bits.unshift(`Cat ${v.category}`);
-  if (v.page === "forecast" && v.scenario) bits.push(SCENARIO_NAMES[v.scenario] || v.scenario);
+  if (v.page === "scenario" && v.quota_pct != null) bits.push(scenarioLabel(v.quota_pct));
   return bits.join(" · ");
 }
 
@@ -85,12 +92,12 @@ function paintContext() {
   const facts = (v.facts || []).slice(0, 6);
   panel.querySelector("#analyst-facts").innerHTML = facts.map((f) =>
     `<div><dt>${esc(f.label)}</dt><dd>${esc(f.value)}</dd></div>`).join("");
-  const label = (v.facts || []).find((f) => f.label === "Recommendation")?.value.split(" · ")[0] || "Buy now";
+  const label = ((v.facts || []).find((f) => f.label === "Outlook")?.value || "this outlook").toLowerCase();
   const signals = new Set((v.facts || []).filter((f) => /^Cat [A-E]$/.test(f.label)).map((f) => f.value.split(" · ")[1]));
-  const allSame = signals.size === 1 ? [...signals][0] : null;
   const list = (SUGGESTIONS[v.page] || SUGGESTIONS.overview)
     .map((s) => s.replace("{label}", label).replace("{cat}", v.category || "B")
-      .replace("Why do all categories say Lean buy?", allSame ? `Why do all categories say ${allSame}?` : "Which category has the clearest signal?"));
+      .replace("Why do all categories show the same outlook?",
+        signals.size === 1 ? "Why do all categories show the same outlook?" : "Which category has the clearest outlook?"));
   panel.querySelector("#analyst-suggest").innerHTML = list.map((s) =>
     `<button type="button" class="chip-q" data-q="${esc(s)}">${esc(s)}</button>`).join("");
 }
@@ -142,7 +149,7 @@ function paintThread() {
   const list = panel.querySelector("#analyst-log");
   if (!thread.length) {
     list.innerHTML = `<div class="analyst-empty"><p><strong>Ask about what you're looking at.</strong></p>
-      <p class="small muted">I use this app's own forecasts and data, say when something is a forecast rather than a fact, and can open pages or set up the planner for you.</p></div>`;
+      <p class="small muted">Compass answers from this app's own forecasts and data, says when something is a forecast rather than a fact, and can open pages or set up the planner for you. It won't tell you to buy or to wait.</p></div>`;
   } else {
     list.innerHTML = thread.map((m, i) => (m.role === "user"
       ? `<div class="msg msg-user"><div class="bubble">${esc(m.content)}</div></div>` : botBubble(m, i))).join("");
@@ -150,7 +157,7 @@ function paintThread() {
   list.scrollTop = list.scrollHeight;
   const sendBtn = panel.querySelector(".analyst-send");
   sendBtn.disabled = busy;
-  sendBtn.setAttribute("aria-label", busy ? "The analyst is answering" : "Send");
+  sendBtn.setAttribute("aria-label", busy ? "Compass is answering" : "Send");
 }
 
 /** Re-render only the message being streamed (cheap, keeps scroll pinned). */
@@ -199,6 +206,11 @@ export function perform(a) {
   switch (a.type) {
     case "navigate": {
       const here = parseHash(location.hash);
+      if (p.page === "scenario" || (p.page === "forecast" && scenarioPct(p.scenario))) {
+        const quota = clampQuota(p.quota_pct ?? scenarioPct(p.scenario) ?? 0);
+        location.hash = `#/scenario/${p.category || v.category || "A"}${quota ? `?quota=${quota}` : ""}`;
+        return;
+      }
       if (p.page === "policy" && here.page === "policy" && pageAction("setCategory")) {
         if (p.category) pageAction("setCategory")(p.category);
         if (p.event) pageAction("highlightEvent")(p.event);
@@ -208,9 +220,11 @@ export function perform(a) {
       return;
     }
     case "set_supply_scenario": {
+      // The Scenario Lab's slider: a whole percentage, or one of the modelled scenarios.
       const cat = p.category || v.category || "A";
-      if (v.page === "forecast" && v.category === cat && pageAction("setScenario")) pageAction("setScenario")(p.scenario);
-      else go({ page: "forecast", category: cat, scenario: p.scenario });
+      const quota = clampQuota(p.quota_pct ?? scenarioPct(p.scenario) ?? 0);
+      if (v.page === "scenario" && v.category === cat && pageAction("setQuota")) pageAction("setQuota")(quota);
+      else location.hash = `#/scenario/${cat}${quota ? `?quota=${quota}` : ""}`;
       return;
     }
     case "set_bid_amount": {
@@ -332,7 +346,7 @@ function onEvent(i, { event, data }) {
     m.final = { actions: data.actions || [], provenance: data.provenance, notice: data.notice, mode: data.mode };
     schedule();
   } else if (event === "error") {
-    fail(i, `The analyst isn't available right now (${data.text || "error"}). The rest of the app still works.`);
+    fail(i, `Compass isn't available right now (${data.text || "error"}). The rest of the app still works.`);
   }
 }
 
@@ -348,7 +362,7 @@ export async function send(question) {
   const v = getView();
   const view = { page: v.page || "overview" };
   if (v.category) view.category = v.category;
-  if (v.page === "forecast" && v.scenario) view.scenario = v.scenario;
+  if (v.page === "scenario" && v.quota_pct != null) view.quota_pct = v.quota_pct;
   if (v.page === "bid" && v.bid) view.bid = v.bid;
   if (v.page === "policy" && v.event) view.event = v.event;
   thread.push({ role: "user", content: question });
@@ -396,8 +410,8 @@ export async function send(question) {
     }
   } catch (err) {
     fail(i, err.name === "AbortError"
-      ? "The analyst took too long to answer. The rest of the app still works — try again in a moment."
-      : `The analyst isn't available right now (${err.message}). The rest of the app still works.`);
+      ? "Compass took too long to answer. The rest of the app still works. Try again in a moment."
+      : `Compass isn't available right now (${err.message}). The rest of the app still works.`);
   } finally {
     clearTimeout(timer);
   }
@@ -426,14 +440,14 @@ function build() {
   panel.setAttribute("aria-labelledby", "analyst-title");
   panel.innerHTML = `
     <header class="analyst-head">
-      <div class="row" style="gap:8px">${ICONS.sparkle}<h2 id="analyst-title">COE Analyst</h2>
+      <div class="row" style="gap:8px">${ICONS.sparkle}<h2 id="analyst-title">Ask Compass</h2>
         <span class="pill pill-neutral" id="analyst-mode" hidden></span></div>
       <div class="row" style="gap:2px">
         <button type="button" class="btn btn-ghost btn-sm" id="analyst-clear">New chat</button>
-        <button type="button" class="icon-btn" id="analyst-close" aria-label="Close the analyst">${ICONS.close}</button>
+        <button type="button" class="icon-btn" id="analyst-close" aria-label="Close Ask Compass">${ICONS.close}</button>
       </div>
     </header>
-    <section class="analyst-context" aria-label="What the analyst can see">
+    <section class="analyst-context" aria-label="What Compass can see">
       <div class="caption">You're viewing</div>
       <div class="analyst-where" id="analyst-where"></div>
       <dl class="analyst-facts" id="analyst-facts"></dl>
@@ -441,11 +455,11 @@ function build() {
     <div class="analyst-log" id="analyst-log" aria-live="polite"></div>
     <div class="analyst-suggest" id="analyst-suggest" aria-label="Suggested questions"></div>
     <form class="analyst-compose" id="analyst-form">
-      <label class="visually-hidden" for="analyst-input">Ask the COE Analyst</label>
+      <label class="visually-hidden" for="analyst-input">Ask Compass a question</label>
       <textarea id="analyst-input" rows="1" maxlength="1000" placeholder="Ask about this page…"></textarea>
       <button type="submit" class="btn analyst-send" aria-label="Send">${ICONS.send}</button>
     </form>
-    <p class="analyst-foot">Forecasts are probabilistic estimates, not financial advice.</p>`;
+    <p class="analyst-foot">Forecasts are probabilistic estimates, not financial advice. COE Compass is independent of LTA.</p>`;
   document.body.appendChild(panel);
 
   const input = panel.querySelector("#analyst-input");
@@ -519,14 +533,10 @@ export function close() {
 
 export function installAnalyst() {
   load();
-  fab = document.createElement("button");
-  fab.type = "button";
-  fab.className = "analyst-fab";
-  fab.setAttribute("aria-controls", "analyst");
-  fab.setAttribute("aria-expanded", "false");
-  fab.innerHTML = `${ICONS.sparkle}<span>Ask COE Analyst</span>`;
+  // The entry point is the "Ask Compass" button in the header, present on every page.
+  fab = document.getElementById("ask-compass");
+  fab.insertAdjacentHTML("afterbegin", ICONS.sparkle);
   fab.addEventListener("click", () => (panel && !panel.hidden ? close() : open()));
-  document.body.appendChild(fab);
   document.addEventListener("coe:ask", (e) => send(e.detail?.question));
   document.addEventListener("coe:open-analyst", () => open());
   document.addEventListener("coe:tour-start", () => close());    // the tour needs the whole page

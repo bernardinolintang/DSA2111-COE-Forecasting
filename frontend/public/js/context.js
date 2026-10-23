@@ -1,9 +1,9 @@
 // What the viewer is looking at, published by the current page.
 //
-// * view: identifiers the COE Analyst sends to the server (page, category,
-//   scenario, bid, event) plus a few display "facts" for the analyst's header.
+// * view: identifiers Ask Compass sends to the server (page, category,
+//   quota change, bid, event) plus a few display "facts" for the analyst's header.
 //   The server re-reads every number from the database; facts are display only.
-// * page actions: in-place handlers the current page offers (e.g. setScenario),
+// * page actions: in-place handlers the current page offers (e.g. setQuota),
 //   so the analyst can change the page without re-rendering it.
 
 let view = { page: "overview" };

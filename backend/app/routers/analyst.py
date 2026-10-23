@@ -1,4 +1,4 @@
-"""COE Analyst: a context-aware assistant beside every page, plus the glossary.
+"""Ask Compass: a context-aware analyst beside every page, plus the glossary.
 
 POST /api/analyst/chat takes the conversation and *where* the viewer is. The
 server rebuilds the numbers from the database, asks the configured language
@@ -83,7 +83,7 @@ def _events(body: AnalystRequest) -> Iterator[tuple[str, dict]]:
     client_id = str(body.client_id) if body.client_id else None
     v = body.view
     view = analyst_context.View(page=v.page, category=v.category, scenario=v.scenario or "base", bid=v.bid,
-                                event=v.event)
+                                event=v.event, quota_pct=v.quota_pct)
     history = [m.model_dump() for m in body.messages[:-1]][-12:]
 
     with engine.connect() as conn:

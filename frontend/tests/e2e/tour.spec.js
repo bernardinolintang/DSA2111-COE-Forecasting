@@ -6,11 +6,11 @@ test.use({ tourSeen: false });
 
 const TITLES = ["Today's market", "Read a forecast", "Test supply scenarios", "Plan a bid",
                 "Understand why", "Why trust the model?", "Watch a target"];
-const HASHES = [/:\d+\/(#\/)?$/, /#\/forecast\/A/, /#\/forecast\/A/, /#\/bid\/A/, /#\/policy\/B/, /#\/model/, /#\/alerts/];
+const HASHES = [/:\d+\/(#\/)?$/, /#\/forecast\/A/, /#\/scenario\/A/, /#\/bid\/A/, /#\/policy\/B/, /#\/model/, /#\/alerts/];
 
 test("first visit offers the tour without forcing it; Not now remembers", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".tour-offer")).toContainText("New to COE Forecast?");
+  await expect(page.locator(".tour-offer")).toContainText("New to COE Compass?");
   await expect(page.locator(".tour-card")).toHaveCount(0);
   await page.getByRole("button", { name: "Not now" }).click();
   await page.reload();
@@ -57,6 +57,6 @@ test("the last step hands over to the analyst", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Take the tour" }).click();
   for (let i = 0; i < 6; i++) await page.locator(".tour-card").getByRole("button", { name: "Next" }).click();
-  await page.getByRole("button", { name: /ask the COE Analyst anything/ }).click();
+  await page.getByRole("button", { name: /ask Compass anything/ }).click();
   await expect(page.locator("#analyst")).toBeVisible();
 });

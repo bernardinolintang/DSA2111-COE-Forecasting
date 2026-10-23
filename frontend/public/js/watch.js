@@ -1,9 +1,9 @@
 // Watchlist change detection.
 //
 // Targets are re-scored on the server after every bidding exercise, but there is
-// no email or push channel. Instead, whenever COE Forecast is open we compare each
+// no email or push channel. Instead, whenever COE Compass is open we compare each
 // target's status with what the viewer last saw on the Watchlist page and:
-//   * show a badge on the Watchlist link and a short notice,
+//   * show a badge on the Plan link (and its Watchlist tab) and a short notice,
 //   * optionally show a browser notification (only while a tab is open).
 // Per-viewer state lives in localStorage; nothing here is required for the app
 // to work, and every storage access is guarded by util.store.
@@ -28,8 +28,9 @@ export async function setNotifications(on) {
   store.set(NOTIFY, permission === "granted");
 }
 
-function setBadge(n) {
-  const link = document.querySelector('.nav-links a[data-nav="alerts"]');
+let badgeCount = 0;
+
+function badgeOn(link, name, n) {
   if (!link) return;
   let badge = link.querySelector(".nav-badge");
   if (!n) { badge?.remove(); link.removeAttribute("aria-label"); return; }
@@ -40,7 +41,14 @@ function setBadge(n) {
     link.appendChild(badge);
   }
   badge.textContent = String(n);
-  link.setAttribute("aria-label", `Watchlist, ${n} update${n > 1 ? "s" : ""}`);
+  link.setAttribute("aria-label", `${name}, ${n} watchlist update${n > 1 ? "s" : ""}`);
+}
+
+/** The count sits on Plan in the main navigation and on its Watchlist tab when that is showing. */
+function setBadge(n) {
+  badgeCount = n;
+  badgeOn(document.querySelector('.nav-links a[data-nav="plan"]'), "Plan", n);
+  badgeOn(document.querySelector('.subnav a[data-sub="alerts"]'), "Watchlist", n);
 }
 
 /** Called by the Watchlist page: everything on screen now counts as seen. */
@@ -79,13 +87,14 @@ export async function checkWatchlist() {
   if (notificationsEnabled()) {
     for (const a of fresh.filter((x) => RANK[x.status] >= RANK.likely && RANK[x.status] > RANK[seen[x.id]])) {
       try {
-        new Notification("COE Forecast", { body: `${describe(a)} is now ${LABEL[a.status]}.`, tag: `coe-watch-${a.id}` });
+        new Notification("COE Compass", { body: `${describe(a)} is now ${LABEL[a.status]}.`, tag: `coe-watch-${a.id}` });
       } catch { /* some browsers only allow notifications from a service worker */ }
     }
   }
 }
 
 export function startWatch() {
+  document.addEventListener("coe:subnav", () => setBadge(badgeCount));     // the tabs are redrawn on navigation
   setTimeout(checkWatchlist, 1500);
   setInterval(checkWatchlist, POLL_MS);
 }

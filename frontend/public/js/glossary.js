@@ -1,6 +1,6 @@
 // "Explain this": small (i) buttons beside difficult terms open a popover with a
 // plain-language explanation, optional technical detail, and a shortcut to ask
-// the COE Analyst. Definitions come from GET /api/glossary (one source of truth
+// Compass. Definitions come from GET /api/glossary (one source of truth
 // shared with the analyst). Works without the AI.
 
 import { api } from "./api.js";
@@ -79,7 +79,7 @@ async function open(btn) {
     <p>${t.simple}</p>
     <details><summary>Technical detail</summary><p class="small">${t.technical}</p></details>
     <button type="button" class="btn btn-ghost btn-sm mt-8" data-ask="${`Explain "${t.term}" using what I'm looking at.`}">
-      ${raw(ICONS.sparkle)}Ask the analyst about this</button>`)
+      ${raw(ICONS.sparkle)}Ask Compass about this</button>`)
     : `<div class="pop-head"><strong id="pop-title">Explanation unavailable</strong>
        <button type="button" class="icon-btn pop-close" aria-label="Close">${ICONS.close}</button></div>
        <p class="small muted">The explanation couldn't be loaded. Check your connection and try again.</p>`;

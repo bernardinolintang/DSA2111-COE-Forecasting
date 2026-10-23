@@ -1,12 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2997ff"/>
-      <stop offset="1" stop-color="#0058b8"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="15" fill="url(#g)"/>
-  <path d="M14 42 L24 34 L32 38 L42 24" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M42 24 L50 20 L50 30 Z" fill="#fff" fill-opacity="0.45"/>
-  <circle cx="42" cy="24" r="4.5" fill="#fff"/>
+  <!-- COE Compass: a "C" with a compass needle pointing through its opening. -->
+  <rect width="64" height="64" rx="14" fill="#0b1f33"/>
+  <path d="M45.4 18.6A19 19 0 1 0 45.4 45.4" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+  <path d="M28.6 28.6L41 23L35.4 35.4Z" fill="#e69b25"/>
+  <path d="M28.6 28.6L24.5 39.5L35.4 35.4Z" fill="#2fb5ad"/>
+  <circle cx="32" cy="32" r="1.7" fill="#0b1f33"/>
 </svg>

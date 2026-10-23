@@ -2,6 +2,11 @@
 
 What changed in the second iteration of the web app, why, and how to run and test it.
 
+> Superseded in part by the third iteration (`coe-compass.md`): the app is now called COE Compass, the
+> analyst is "Ask Compass" in the header, the Buy / Wait signal described below became a market outlook,
+> and supply scenarios moved from the Forecast page to the Scenario Lab. The analyst's architecture,
+> streaming, action whitelist and setup variables below still apply.
+
 ## 1. Audit findings and root causes
 
 | Issue | Root cause | Fix |

@@ -96,8 +96,13 @@ def fake_db(monkeypatch):
     return run
 
 
-def _ctx(page="overview", category=None, scenario="base", bid=None, client_id="c1"):
-    return context.build(None, context.View(page=page, category=category, scenario=scenario, bid=bid), client_id)
+LABELS = ("Downward pressure", "Slight downward pressure", "No clear direction", "Slight upward pressure",
+          "Upward pressure")
+
+
+def _ctx(page="overview", category=None, scenario="base", bid=None, client_id="c1", quota_pct=None):
+    view = context.View(page=page, category=category, scenario=scenario, bid=bid, quota_pct=quota_pct)
+    return context.build(None, view, client_id)
 
 
 # ---------------------------------------------------------------------------
@@ -108,18 +113,31 @@ def test_context_contains_every_category_with_real_numbers(fake_db):
     cats = {c["code"]: c for c in ctx.app_data["categories"]}
     assert set(cats) == {"A", "B"}
     assert cats["A"]["latest_result"]["premium"] == 131_890
-    assert cats["A"]["recommendation"]["label"] in ("Buy now", "Lean buy", "Wait", "Lean wait")
+    assert cats["A"]["outlook"]["label"] in LABELS
+    assert "action" not in cats["A"]["outlook"] and "recommendation" not in cats["A"]
     assert cats["A"]["forecast_as_announced"]["next_exercise"]["exercise"] == "Oct 2026 · 1st"
     assert ctx.app_data["as_of"]["model_run"] == 7
     assert ctx.app_data["policy_events"][0]["estimated_effects"][0]["significant"] is False
 
 
 def test_current_view_reflects_page_category_scenario_and_bid(fake_db):
-    ctx = _ctx(page="forecast", category="A", scenario="quota_plus_20")
+    ctx = _ctx(page="scenario", category="A", scenario="quota_plus_20")
     focus = ctx.current_view["focus"]
-    assert ctx.current_view["page"] == "Forecast" and ctx.current_view["category"] == "Cat A"
-    assert focus["scenario"] == "+20% supply"
+    assert ctx.current_view["page"] == "Scenario Lab" and ctx.current_view["category"] == "Cat A"
+    assert ctx.current_view["supply_scenario"] == focus["scenario"] == "+20% supply"
     assert focus["forecast_next_six_exercises"][0]["median"] == round(_steps("A", "quota_plus_20")[0]["q50"])
+    assert focus["vs_as_announced"]["interpolated"] is False and focus["vs_as_announced"]["difference"] < 0
+
+    # the slider: +15% is half-way between the +10% and +20% runs, and says it is interpolated
+    ctx = _ctx(page="scenario", category="A", quota_pct=15)
+    focus = ctx.current_view["focus"]
+    half = (_steps("A", "quota_plus_10")[0]["q50"] + _steps("A", "quota_plus_20")[0]["q50"]) / 2
+    assert focus["scenario"] == "+15% supply" and focus["vs_as_announced"]["interpolated"] is True
+    assert focus["forecast_next_six_exercises"][0]["median"] == round(half)
+    assert "+15% supply" in context.provenance(ctx)
+
+    # the Forecast page always shows the forecast as announced
+    assert _ctx(page="forecast", category="A", scenario="quota_plus_20").current_view["focus"]["scenario"] == "As announced"
 
     bid = _ctx(page="bid", category="B", bid=140_000).current_view["bid_planner"]
     assert bid["bid"] == 140_000 and 50 < bid["win_probability_pct"] < 100
@@ -145,6 +163,21 @@ def test_navigation_actions_are_validated_and_normalised():
         actions.validate("navigate", {"page": "forecast", "category": "Z"})
     with pytest.raises(actions.ActionError):
         actions.validate("delete_everything", {})
+    for page in ("scenario", "plan", "learn"):
+        assert actions.validate("navigate", {"page": page}).params["page"] == page
+
+
+def test_supply_scenarios_open_the_scenario_lab():
+    a = actions.validate("navigate", {"page": "forecast", "category": "B", "scenario": "quota_plus_10"})
+    assert a.params == {"page": "scenario", "category": "B", "scenario": "quota_plus_10"}
+    assert a.summary == "Open Scenario Lab for Cat B"
+    a = actions.validate("set_supply_scenario", {"scenario": "quota_minus_10"})
+    assert a.params == {"quota_pct": -10, "scenario": "quota_minus_10"} and a.summary == "Supply scenario: −10% supply"
+    a = actions.validate("set_supply_scenario", {"quota_pct": 7, "category": "c"})
+    assert a.params == {"quota_pct": 7, "category": "C"} and a.summary == "Supply scenario: +7% supply"
+    for bad in ({"quota_pct": 30}, {"quota_pct": "lots"}, {"scenario": "quota_plus_99"}, {}):
+        with pytest.raises(actions.ActionError):
+            actions.validate("set_supply_scenario", bad)
 
 
 def test_persistent_actions_require_confirmation():
@@ -167,6 +200,9 @@ def test_persistent_actions_require_confirmation():
     ("Take me to the bid planner for Cat A", "bid", "A"),
     ("open the model page", "model", None),
     ("go to my watchlist", "alerts", None),
+    ("take me to the scenario lab", "scenario", "A"),
+    ("open my plan", "plan", None),
+    ("show me the data sources", "learn", None),
 ])
 def test_offline_navigation(fake_db, question, page, category):
     reply, acts = offline.answer(question, _ctx(), None)
@@ -190,8 +226,13 @@ def test_offline_bid_for_probability_uses_the_forecast(fake_db):
 
 
 def test_offline_explains_recommendation_and_terms(fake_db):
-    reply, _ = offline.answer("Why is Cat A saying Buy now?", _ctx(), None)
-    assert "Cat A" in reply and "8%" in reply
+    reply, _ = offline.answer("Why is Cat A showing no clear direction?", _ctx(), None)
+    assert "Cat A shows" in reply and "8%" in reply and "55%" in reply
+    assert "buy now" not in reply.lower()
+    reply, _ = offline.answer("Should I buy now or wait?", _ctx(page="forecast", category="A"), None)
+    assert reply.startswith("COE Compass doesn't tell you to buy or to wait") and "Cat A shows" in reply
+    reply, _ = offline.answer("Why do all categories say the same thing?", _ctx(), None)
+    assert "- Cat A:" in reply and "- Cat B:" in reply
     reply, _ = offline.answer("What does n.s. mean in Policy Lab?", _ctx(page="policy"), None)
     assert "not statistically significant" in reply
     reply, _ = offline.answer("What does the 80% range mean?", _ctx(), None)
@@ -204,6 +245,11 @@ def test_offline_biggest_policy_effect_and_scenarios(fake_db):
     assert acts[0].params == {"page": "policy", "category": "B", "event": "loans"}
     reply, acts = offline.answer("What if supply rises 20% for Cat A?", _ctx(), None)
     assert acts[0].type == "set_supply_scenario" and acts[0].params["scenario"] == "quota_plus_20"
+    assert "the outlook is" in reply and "interpolated" not in reply
+    reply, acts = offline.answer("What if supply rises 15% for Cat A?", _ctx(), None)
+    assert acts[0].params == {"quota_pct": 15, "category": "A"} and "interpolated" in reply
+    assert offline.detect_quota_pct("cut the quota by 12%") == -12
+    assert offline.detect_quota_pct("supply up 45%") is None                     # outside the modelled range
 
 
 def test_offline_admits_what_it_cannot_do(fake_db):
@@ -354,9 +400,9 @@ def _groq(client, tool=None, alerts=None):
 
 
 def test_groq_streams_text_and_sends_a_compact_request():
-    client = FakeGroq([_chunk("Cat A is "), _chunk("a Lean buy.")])
+    client = FakeGroq([_chunk("Cat A shows "), _chunk("no clear direction.")])
     events = _groq(client)
-    assert events == [("delta", "Cat A is "), ("delta", "a Lean buy.")]
+    assert events == [("delta", "Cat A shows "), ("delta", "no clear direction.")]
     call = client.calls[0]
     assert call["stream"] is True and call["tool_choice"] == "auto"
     names = {t["function"]["name"] for t in call["tools"]}
@@ -440,9 +486,9 @@ def test_compact_focuses_on_the_category_in_view(fake_db):
     full = _ctx().app_data
     small = context.compact(full, focus="B")
     a, b = small["categories"]
-    assert b == {**full["categories"][1], "recommendation": {k: v for k, v in full["categories"][1]["recommendation"].items()
-                                                            if k != "summary"}}
-    assert set(a) == {"code", "name", "title", "latest_premium", "signal", "conviction", "expected_change_pct"}
+    assert b == {**full["categories"][1], "outlook": {k: v for k, v in full["categories"][1]["outlook"].items()
+                                                      if k != "summary"}}
+    assert set(a) == {"code", "name", "title", "latest_premium", "outlook", "expected_change_pct", "prob_lower_pct"}
     assert a["latest_premium"] == 131_890
     assert [r["model"] for r in small["model_accuracy"]["leaderboard_by_pinball_loss"]] == [
         "Hybrid: TFT + Box-Tiao ARIMAX (ours)", "Random walk"]

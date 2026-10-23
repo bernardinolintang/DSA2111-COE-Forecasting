@@ -1,29 +1,27 @@
-"""Decision support: turning probabilistic forecasts into advice.
+"""Decision support: turning probabilistic forecasts into a market outlook.
 
-Rules (from the project proposal):
-  * WAIT     – the median (p50) forecast at the end of the horizon (one quota
-               quarter, 6 exercises) is at least ``threshold`` (default 8%)
-               below the latest premium.
-  * BUY NOW  – otherwise; waiting is not expected to save enough money to
-               justify the risk that prices rise instead.
+The app describes where premiums are heading and how sure the model is. It does
+not tell anyone to buy or to wait: a forecast of one cost component cannot make
+that call, so the evidence is shown and the decision is left to the reader.
 
-The advice also carries the probabilities behind it, read from the forecast
-distribution, and a *conviction* level so the UI never presents a coin flip
-as a strong call:
+The outlook is read from the forecast distribution at the end of the horizon
+(one quota quarter, 6 exercises):
 
-  * ``prob_lower``   – P(premium at the horizon < today)
-  * ``prob_save``    – P(premium at the horizon <= today x (1 - threshold)),
-                       i.e. the chance that waiting saves at least the threshold.
-                       This is the probability the Wait rule is really about.
-  * ``conviction``   – how clearly the forecast supports the action:
-        buy_now: P(higher) >= 65% high, >= 55% medium, otherwise low
-        wait:    P(save)   >= 65% high, >= 50% medium, otherwise low
-  * ``label``        – "Buy now" / "Lean buy" / "Wait" / "Lean wait": the action
-                       (unchanged) worded by conviction.
+  * ``prob_lower``  – P(premium at the horizon < today)
+  * ``outlook``     – which way the odds lean, and how clearly:
+        easing   P(lower)  >= 65%   "Downward pressure"
+        softer   P(lower)  >= 55%   "Slight downward pressure"
+        firmer   P(higher) >= 55%   "Slight upward pressure"
+        rising   P(higher) >= 65%   "Upward pressure"
+        steady   otherwise          "No clear direction"
+  * ``prob_drop``   – P(premium at the horizon <= today x (1 - threshold)), the
+                      chance of a drop big enough to matter (default 8%, the
+                      saving the project proposal treats as worth waiting for).
+  * ``uncertainty`` – how wide the 80% range is at the horizon, as a share of
+                      today's premium: low (< ±8%), moderate (up to ±15%), high.
 
-Because COE premiums are close to a random walk, the median rarely moves 8% in
-one quarter, so Buy now is the usual outcome of the rule. Conviction is what
-tells a flat, uncertain "Buy now" apart from a confident one.
+Because COE premiums are close to a random walk, "No clear direction" is the
+usual outcome. That is the honest reading of a flat, uncertain forecast.
 """
 
 from __future__ import annotations
@@ -33,23 +31,37 @@ from dataclasses import dataclass
 from ..labels import exercise_label
 from . import quantiles as qt
 
-HIGH, MEDIUM = 0.65, 0.55          # conviction cut-offs for buy_now (P(higher))
-WAIT_MEDIUM = 0.50                 # wait is medium from 50% (the median is already below the threshold)
+CLEAR, SLIGHT = 0.65, 0.55         # how far the odds must lean before a direction is called
+LOW_WIDTH, MODERATE_WIDTH = 8.0, 15.0     # half-width of the 80% range, % of today's premium
+
+OUTLOOKS = {
+    "easing": {"label": "Downward pressure", "direction": "down", "strength": "strong"},
+    "softer": {"label": "Slight downward pressure", "direction": "down", "strength": "slight"},
+    "steady": {"label": "No clear direction", "direction": "flat", "strength": "none"},
+    "firmer": {"label": "Slight upward pressure", "direction": "up", "strength": "slight"},
+    "rising": {"label": "Upward pressure", "direction": "up", "strength": "strong"},
+}
 
 
 @dataclass
 class Advice:
-    action: str                 # "wait" | "buy_now"
-    headline: str               # "Wait" | "Buy now" (the rule's action)
-    label: str                  # action worded by conviction, e.g. "Lean buy"
-    conviction: str             # "high" | "medium" | "low"
+    outlook: str                # "easing" | "softer" | "steady" | "firmer" | "rising"
+    label: str                  # the outlook in words, e.g. "Slight downward pressure"
+    direction: str              # "down" | "flat" | "up"
+    strength: str               # "strong" | "slight" | "none"
     summary: str
     expected_change_pct: float
     prob_lower_pct: float
     prob_higher_pct: float
-    prob_save_pct: float
-    confidence_pct: float       # P(higher) for buy_now, P(lower) for wait (kept for API compatibility)
+    prob_drop_pct: float        # chance of a drop of at least threshold_pct
+    meaningful_drop: bool       # the median itself is at least threshold_pct below today
+    uncertainty: str            # "low" | "moderate" | "high"
+    uncertainty_pct: float      # half-width of the 80% range at the horizon, % of today's premium
     current: float
+    next_label: str
+    next_q10: float
+    next_q50: float
+    next_q90: float
     horizon_label: str
     horizon_q10: float
     horizon_q50: float
@@ -57,90 +69,110 @@ class Advice:
     cheapest_label: str
     cheapest_q50: float
     threshold_pct: float
+    drivers: list[dict]
     reasons: list[str]
 
 
-def conviction_for(action: str, prob_higher: float, prob_save: float) -> str:
-    if action == "wait":
-        return "high" if prob_save >= HIGH else "medium" if prob_save >= WAIT_MEDIUM else "low"
-    return "high" if prob_higher >= HIGH else "medium" if prob_higher >= MEDIUM else "low"
+def outlook_for(prob_lower: float) -> str:
+    prob_higher = 1.0 - prob_lower
+    if prob_lower >= CLEAR:
+        return "easing"
+    if prob_lower >= SLIGHT:
+        return "softer"
+    if prob_higher >= CLEAR:
+        return "rising"
+    if prob_higher >= SLIGHT:
+        return "firmer"
+    return "steady"
 
 
-def label_for(action: str, conviction: str) -> str:
-    if action == "wait":
-        return "Wait" if conviction == "high" else "Lean wait"
-    return "Buy now" if conviction == "high" else "Lean buy"
+def uncertainty_for(width_pct: float) -> str:
+    return "low" if width_pct < LOW_WIDTH else "moderate" if width_pct <= MODERATE_WIDTH else "high"
 
 
 def advise(category_name: str, current: float, steps: list[dict], history: list[dict],
            threshold: float) -> Advice:
     """``steps``: forecast rows ordered by step; ``history``: recent exercises, oldest first."""
-    end = steps[-1]
+    nxt, end = steps[0], steps[-1]
     end_values = qt.row_values(end)
     change = end["q50"] / current - 1.0
     prob_lower = qt.cdf(end_values, current)
-    prob_save = qt.cdf(end_values, current * (1.0 - threshold))
+    prob_higher = 1.0 - prob_lower
+    prob_drop = qt.cdf(end_values, current * (1.0 - threshold))
     cheapest = min(steps, key=lambda s: s["q50"])
     horizon_label = exercise_label(end["month"], end["bidding_no"])
+    width = (end["q90"] - end["q10"]) / current * 50
 
-    if change <= -threshold:
-        action, confidence = "wait", prob_lower
-        headline = "Wait"
-        summary = (f"{category_name} is expected to fall about {abs(change) * 100:.0f}% by {horizon_label}. "
-                   f"There is a {prob_save * 100:.0f}% chance waiting saves {threshold * 100:.0f}% or more.")
+    level = outlook_for(prob_lower)
+    median = f"the median forecast is {change * 100:+.1f}% by {horizon_label}"
+    if level == "easing":
+        lead = (f"{category_name} premiums are more likely to fall than rise: {median}, with a "
+                f"{prob_lower * 100:.0f}% chance of a lower premium.")
+    elif level == "softer":
+        lead = (f"Slight downward pressure on {category_name}: {median}, with a "
+                f"{prob_lower * 100:.0f}% chance of a lower premium.")
+    elif level == "rising":
+        lead = (f"{category_name} premiums are more likely to rise than fall: {median}, with a "
+                f"{prob_higher * 100:.0f}% chance of a higher premium.")
+    elif level == "firmer":
+        lead = (f"Slight upward pressure on {category_name}: {median}, with a "
+                f"{prob_higher * 100:.0f}% chance of a higher premium.")
     else:
-        action, confidence = "buy_now", 1.0 - prob_lower
-        headline = "Buy now"
-        if change >= 0.03:
-            summary = (f"{category_name} is more likely to rise (about {change * 100:+.0f}% by {horizon_label}), "
-                       "so waiting would probably cost more.")
-        elif prob_lower > MEDIUM:
-            summary = (f"{category_name} may drift lower ({change * 100:+.1f}% by {horizon_label}), but a drop "
-                       f"big enough to be worth waiting for ({threshold * 100:.0f}%+) has only a "
-                       f"{prob_save * 100:.0f}% chance.")
-        elif 1.0 - prob_lower < MEDIUM:
-            summary = (f"No clear direction for {category_name}: the median is {change * 100:+.1f}% by "
-                       f"{horizon_label}, and a fall is about as likely as a rise. A drop big enough to be "
-                       f"worth waiting for ({threshold * 100:.0f}%+) has a {prob_save * 100:.0f}% chance.")
-        else:
-            summary = (f"No meaningful drop is expected for {category_name} "
-                       f"({change * 100:+.1f}% by {horizon_label}), below the {threshold * 100:.0f}% "
-                       "saving needed to justify waiting.")
+        lead = f"No clear direction for {category_name}: {median}, and a fall is about as likely as a rise."
+    summary = f"{lead} A drop of {threshold * 100:.0f}% or more has a {prob_drop * 100:.0f}% chance."
 
-    conviction = conviction_for(action, 1.0 - prob_lower, prob_save)
+    drivers = market_drivers(current, steps, history)
     return Advice(
-        action=action, headline=headline, label=label_for(action, conviction), conviction=conviction,
-        summary=summary,
+        outlook=level, summary=summary, **OUTLOOKS[level],
         expected_change_pct=round(change * 100, 2), prob_lower_pct=round(prob_lower * 100, 1),
-        prob_higher_pct=round((1.0 - prob_lower) * 100, 1), prob_save_pct=round(prob_save * 100, 1),
-        confidence_pct=round(confidence * 100, 1), current=current, horizon_label=horizon_label,
+        prob_higher_pct=round(prob_higher * 100, 1), prob_drop_pct=round(prob_drop * 100, 1),
+        meaningful_drop=change <= -threshold,
+        uncertainty=uncertainty_for(width), uncertainty_pct=round(width, 1), current=current,
+        next_label=exercise_label(nxt["month"], nxt["bidding_no"]),
+        next_q10=nxt["q10"], next_q50=nxt["q50"], next_q90=nxt["q90"],
+        horizon_label=horizon_label,
         horizon_q10=end["q10"], horizon_q50=end["q50"], horizon_q90=end["q90"],
         cheapest_label=exercise_label(cheapest["month"], cheapest["bidding_no"]),
         cheapest_q50=cheapest["q50"], threshold_pct=threshold * 100,
-        reasons=market_reasons(current, steps, history),
+        drivers=drivers, reasons=[f"{d['title']}: {d['text']}." for d in drivers],
     )
 
 
-def market_reasons(current: float, steps: list[dict], history: list[dict]) -> list[str]:
-    """Short, plain-English drivers behind the forecast."""
-    reasons = []
+def market_drivers(current: float, steps: list[dict], history: list[dict]) -> list[dict]:
+    """The evidence behind the outlook: demand, supply and how wide the forecast is.
+
+    Each driver has a ``trend`` ("up" | "down" | "flat", or the uncertainty level), the
+    number behind it and a plain-English sentence.
+    """
+    drivers = []
     if len(history) >= 24:
         ratio_now = history[-1]["bids_received"] / max(history[-1]["quota"], 1)
         ratio_avg = sum(h["bids_received"] / max(h["quota"], 1) for h in history[-24:]) / 24
-        trend = ("higher than" if ratio_now > ratio_avg * 1.05
-                 else "lower than" if ratio_now < ratio_avg * 0.95 else "in line with")
-        reasons.append(f"Demand pressure: {ratio_now:.2f} bids per COE, {trend} the one-year average of {ratio_avg:.2f}.")
+        trend = "up" if ratio_now > ratio_avg * 1.05 else "down" if ratio_now < ratio_avg * 0.95 else "flat"
+        words = {"up": "higher than", "down": "lower than", "flat": "in line with"}[trend]
+        drivers.append({"key": "demand", "title": "Demand pressure", "trend": trend, "value": round(ratio_now, 2),
+                        "text": f"{ratio_now:.2f} bids per COE, {words} the one-year average of {ratio_avg:.2f}"})
 
         quota_now = history[-1]["quota"]
         quota_year_ago = history[-24]["quota"]
-        change = quota_now / max(quota_year_ago, 1) - 1
-        reasons.append(f"Supply: quota is {quota_now:,} per exercise, {change * 100:+.0f}% versus a year ago.")
+        change = (quota_now / max(quota_year_ago, 1) - 1) * 100
+        trend = "up" if change > 2 else "down" if change < -2 else "flat"
+        drivers.append({"key": "quota", "title": "Supply", "trend": trend, "value": round(change, 1),
+                        "text": f"quota is {quota_now:,} per exercise, {change:+.0f}% versus a year ago"})
 
     end = steps[-1]
-    width = (end["q90"] - end["q10"]) / current * 100
-    reasons.append(f"Uncertainty: 80% of outcomes fall within ${end['q10']:,.0f}–${end['q90']:,.0f} "
-                   f"(±{width / 2:.0f}%).")
-    return reasons
+    width = (end["q90"] - end["q10"]) / current * 50
+    drivers.append({"key": "uncertainty", "title": "Uncertainty", "trend": uncertainty_for(width),
+                    "value": round(width, 1),
+                    "text": f"80% of outcomes fall within ${end['q10']:,.0f}–${end['q90']:,.0f} (±{width:.0f}%)"})
+    return drivers
+
+
+def signal(advice: Advice) -> dict:
+    """The compact outlook shown on the Overview cards and the market status bar."""
+    keys = ("outlook", "label", "direction", "strength", "summary", "expected_change_pct", "prob_lower_pct",
+            "prob_higher_pct", "prob_drop_pct", "uncertainty", "uncertainty_pct", "drivers")
+    return {k: getattr(advice, k) for k in keys}
 
 
 def alert_outlook(direction: str, target: float, latest: float, steps: list[dict]) -> dict:

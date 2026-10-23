@@ -7,8 +7,7 @@ import { test } from "node:test";
 
 import { mixPts, sample } from "../../public/js/charts.js";
 import { DURATION, EASE_FN } from "../../public/js/motion.js";
-import { winProbability } from "../../public/js/pages/bid.js";
-import { scenarioDelta } from "../../public/js/pages/forecast.js";
+import { scenarioDelta, winProbability } from "../../public/js/forecast-math.js";
 import { eventPeriod } from "../../public/js/pages/policy.js";
 
 test("sample interpolates inside a series and returns null outside it", () => {
@@ -37,15 +36,15 @@ test("mixPts on different grids keeps points one side lacks at their own value",
 });
 
 test("scenario comparison is worded, not colour-only", () => {
-  assert.equal(scenarioDelta(100, 100, "base"), null);
-  const lower = scenarioDelta(95_000, 100_000, "quota_plus_20");
+  assert.equal(scenarioDelta(100, 100, 0), null);
+  const lower = scenarioDelta(95_000, 100_000, 20);
   assert.equal(lower.dir, "down");
   assert.equal(lower.diff, -5000);
   assert.match(lower.text, /More supply than announced lowers/);
-  const higher = scenarioDelta(104_000, 100_000, "quota_minus_10");
+  const higher = scenarioDelta(104_000, 100_000, -10);
   assert.equal(higher.dir, "up");
   assert.match(higher.text, /Less supply than announced raises/);
-  assert.equal(scenarioDelta(100_100, 100_000, "quota_plus_10").dir, "flat");
+  assert.equal(scenarioDelta(100_020, 100_000, 10).dir, "flat");
 });
 
 test("win probability interpolates the curve and clamps at its ends", () => {

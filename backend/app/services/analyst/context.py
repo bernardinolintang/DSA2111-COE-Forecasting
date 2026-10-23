@@ -1,6 +1,6 @@
-"""Structured context for the COE Analyst.
+"""Structured context for the COE Compass analyst.
 
-The browser only says *where* the viewer is (page, category, scenario, bid);
+The browser only says *where* the viewer is (page, category, quota change, bid);
 every number the analyst sees is re-read here from the database with the same
 services the pages use, so the model is never fed scraped or client-supplied
 figures.
@@ -21,15 +21,19 @@ from ...config import settings
 from ...labels import CATEGORIES, MODELS, SCENARIOS, exercise_label
 from .. import quantiles as qt
 from .. import repository as repo
-from ..recommendation import advise, alert_outlook
+from .. import scenarios as sc
+from ..recommendation import Advice, advise, alert_outlook
 
 PAGES = {
     "overview": "Overview",
     "forecast": "Forecast",
+    "scenario": "Scenario Lab",
     "bid": "Bid planner",
+    "plan": "My plan",
     "policy": "Policy Lab",
-    "model": "Model",
+    "model": "Model performance",
     "alerts": "Watchlist",
+    "learn": "Learn",
 }
 KIND = {"step": "Permanent shift", "pulse": "One-off shock", "temporary": "Temporary shift"}
 
@@ -41,6 +45,12 @@ class View:
     scenario: str = "base"
     bid: float | None = None
     event: str | None = None
+    quota_pct: int | None = None       # the Scenario Lab slider; None = use ``scenario``
+
+    @property
+    def pct(self) -> int:
+        """Next quarter's quota change in percent, whichever way the page expressed it."""
+        return sc.PCT_OF.get(self.scenario, 0) if self.quota_pct is None else self.quota_pct
 
 
 @dataclass
@@ -77,10 +87,31 @@ def load_steps(conn: Connection, ctx: AnalystContext, category: str, scenario: s
     return ctx.steps.get(key, [])
 
 
-def recommendation_for(ctx: AnalystContext, category: str, steps: list[dict]):
+def steps_for_quota(conn: Connection, ctx: AnalystContext, category: str, pct: int) -> list[dict]:
+    """Forecast rows for any quota change in the modelled range (interpolated between runs)."""
+    if not ctx.run:
+        return []
+    return sc.steps_for(conn, ctx.run["id"], category, pct, load=lambda s: load_steps(conn, ctx, category, s))
+
+
+def recommendation_for(ctx: AnalystContext, category: str, steps: list[dict]) -> Advice:
     latest = ctx.latest[category]
     return advise(CATEGORIES[category]["name"], latest["premium"], steps, ctx.recent[category],
                   settings.wait_threshold)
+
+
+def outlook_dict(advice: Advice, summary: bool = True) -> dict:
+    """The market outlook as the analyst sees it (plain keys, no internal codes)."""
+    out = {
+        "label": advice.label, "direction": advice.direction, "strength": advice.strength,
+        "expected_change_pct": advice.expected_change_pct,
+        "prob_higher_pct": advice.prob_higher_pct, "prob_lower_pct": advice.prob_lower_pct,
+        "prob_meaningful_drop_pct": advice.prob_drop_pct,
+        "model_uncertainty": f"{advice.uncertainty} (80% range is ±{advice.uncertainty_pct:.0f}% of today's premium)",
+    }
+    if summary:
+        out["summary"] = advice.summary
+    return out
 
 
 def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext:
@@ -125,12 +156,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
                 "end_of_quarter": {"exercise": advice.horizon_label, "median": _r(end["q50"]),
                                    "range_50": _range(end, "q25", "q75"), "range_80": _range(end, "q10", "q90")},
             }
-            entry["recommendation"] = {
-                "action": advice.action, "label": advice.label, "conviction": advice.conviction,
-                "expected_change_pct": advice.expected_change_pct,
-                "prob_higher_pct": advice.prob_higher_pct, "prob_lower_pct": advice.prob_lower_pct,
-                "prob_save_threshold_pct": advice.prob_save_pct, "summary": advice.summary,
-            }
+            entry["outlook"] = outlook_dict(advice)
             entry["bid_suggestions_next_exercise"] = {
                 f"{c}%_chance": _r(qt.quantile(values, c / 100)) for c in (50, 75, 90, 95)}
         categories.append(entry)
@@ -158,12 +184,15 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
             "model_run": run["id"] if run else None,
             "model_retrained": (run["finished_at"] or run["created_at"]).strftime("%d %b %Y") if run else None,
         },
-        "recommendation_rule": {
-            "wait_threshold_pct": round(settings.wait_threshold * 100),
+        "outlook_rule": {
+            "meaningful_drop_pct": round(settings.wait_threshold * 100),
             "horizon": "end of the next quota quarter (6 bidding exercises ahead)",
+            "slight_direction_from_pct": 55, "clear_direction_from_pct": 65,
         },
         "supply_scenarios": [{"id": k, "label": v["label"], "description": v["description"]}
                              for k, v in SCENARIOS.items()],
+        "supply_scenarios_note": "Any whole percentage from -20 to +20 can be looked up; points between the "
+                                 "modelled scenarios are interpolated.",
         "categories": categories,
         "policy_events": events,
         "model_accuracy": _model_summary(conn),
@@ -202,32 +231,36 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
     out: dict = {"page": PAGES.get(v.page, v.page)}
     if v.category:
         out["category"] = CATEGORIES[v.category]["name"]
-    if v.page == "forecast":
-        out["supply_scenario"] = SCENARIOS[v.scenario]["label"]
+    if v.page == "scenario":
+        out["supply_scenario"] = sc.label(v.pct)
     if v.page == "policy" and v.event:
         out["highlighted_event"] = v.event
 
     cat = v.category
     if cat and ctx.run and cat in ctx.latest:
-        scenario = v.scenario if v.page == "forecast" else "base"
-        steps = load_steps(conn, ctx, cat, scenario)
+        pct = v.pct if v.page == "scenario" else 0
+        steps = steps_for_quota(conn, ctx, cat, pct)
         if steps:
             advice = recommendation_for(ctx, cat, steps)
             out["focus"] = {
-                "category": CATEGORIES[cat]["name"], "scenario": SCENARIOS[scenario]["label"],
+                "category": CATEGORIES[cat]["name"], "scenario": sc.label(pct),
                 "forecast_next_six_exercises": [
                     {"exercise": exercise_label(s["month"], s["bidding_no"]), "quota_assumed": s["quota"],
                      "p10": _r(s["q10"]), "p25": _r(s["q25"]), "median": _r(s["q50"]), "p75": _r(s["q75"]),
                      "p90": _r(s["q90"])} for s in steps],
-                "recommendation": {
-                    "label": advice.label, "action": advice.action, "conviction": advice.conviction,
-                    "summary": advice.summary, "expected_change_pct": advice.expected_change_pct,
-                    "prob_higher_pct": advice.prob_higher_pct, "prob_lower_pct": advice.prob_lower_pct,
-                    "prob_save_threshold_pct": advice.prob_save_pct,
-                    "cheapest_expected": {"exercise": advice.cheapest_label, "median": _r(advice.cheapest_q50)},
+                "outlook": {
+                    **outlook_dict(advice),
+                    "lowest_expected": {"exercise": advice.cheapest_label, "median": _r(advice.cheapest_q50)},
                     "market_reasons": advice.reasons,
                 },
             }
+            if pct:
+                base = recommendation_for(ctx, cat, load_steps(conn, ctx, cat, "base"))
+                out["focus"]["vs_as_announced"] = {
+                    "median_at_horizon_as_announced": _r(base.horizon_q50),
+                    "difference": _r(advice.horizon_q50 - base.horizon_q50),
+                    "interpolated": sc.scenario_id(pct) is None,
+                }
         if v.page == "bid" and v.bid:
             base = load_steps(conn, ctx, cat, "base")
             if base:
@@ -256,7 +289,7 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
 def compact(app_data: dict, focus: str | None = None) -> dict:
     """A smaller app_data for providers with tight token limits (Groq's free tier allows
     8K tokens a minute, and a question that uses a tool costs two requests). Same
-    numbers, less prose: recommendation summaries are dropped (the model explains from
+    numbers, less prose: outlook summaries are dropped (the model explains from
     the figures), categories other than the one in view are summarised in one line,
     the leaderboard keeps our model, the random walk and the best, and policy effects
     become rows."""
@@ -265,18 +298,18 @@ def compact(app_data: dict, focus: str | None = None) -> dict:
     out["supply_scenarios"] = {s["id"]: s["label"] for s in app_data.get("supply_scenarios", [])}
     out["categories"] = []
     for c in app_data.get("categories", []):
-        rec = c.get("recommendation")
+        rec = c.get("outlook")
         if focus and c["code"] != focus:
             brief = {"code": c["code"], "name": c["name"], "title": c["title"],
                      "latest_premium": c["latest_result"]["premium"]}
             if rec:
-                brief.update(signal=rec["label"], conviction=rec["conviction"],
-                             expected_change_pct=rec["expected_change_pct"])
+                brief.update(outlook=rec["label"], expected_change_pct=rec["expected_change_pct"],
+                             prob_lower_pct=rec["prob_lower_pct"])
             out["categories"].append(brief)
             continue
         c = dict(c)
         if rec:
-            c["recommendation"] = {k: v for k, v in rec.items() if k != "summary"}
+            c["outlook"] = {k: v for k, v in rec.items() if k != "summary"}
         out["categories"].append(c)
     if focus:
         out["categories_note"] = "Full detail for the category in view; the others are summarised."
@@ -302,8 +335,8 @@ def provenance(ctx: AnalystContext) -> str | None:
     if not as_of.get("data_through"):
         return None
     v = ctx.view
-    subject = f"{CATEGORIES[v.category]['name']} forecast" if v.category else "COE Forecast data"
-    if v.page == "forecast" and v.category and v.scenario != "base":
-        subject += f" ({SCENARIOS[v.scenario]['label'].lower()})"
+    subject = f"{CATEGORIES[v.category]['name']} forecast" if v.category else "COE Compass data"
+    if v.page == "scenario" and v.category and v.pct:
+        subject += f" ({sc.label(v.pct).lower()})"
     run = f" · model run #{as_of['model_run']}, retrained {as_of['model_retrained']}" if as_of.get("model_run") else ""
     return f"Based on {subject}, results through the {as_of['data_through']} bidding exercise{run}."

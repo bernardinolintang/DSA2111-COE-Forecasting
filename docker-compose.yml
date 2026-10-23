@@ -53,6 +53,7 @@ services:
       # COE Analyst: put GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env; without a key it runs in basic mode.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANALYST_ENABLED: ${ANALYST_ENABLED:-true}      # false = basic mode (deterministic; used for e2e runs)
       ANALYST_PROVIDER: ${ANALYST_PROVIDER:-}
       ANALYST_MODEL: ${ANALYST_MODEL:-}
       ANALYST_EFFORT: ${ANALYST_EFFORT:-}

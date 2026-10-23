@@ -5,16 +5,25 @@ const cache = new Map();
 const settled = new Map();     // path -> data, once a cached GET has resolved
 
 async function request(method, path, body) {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    // The request never reached the service (offline, DNS, the pod restarting).
+    throw new Error("COE Compass can't reach its data service right now. Check your connection and try again.");
+  }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(", ") : data.detail;
-    throw new Error(detail || `Request failed (${res.status})`);
+    const fallback = res.status >= 500
+      ? `The data service is temporarily unavailable (${res.status}). It usually recovers within a minute.`
+      : `Request failed (${res.status})`;
+    throw new Error(detail || fallback);
   }
   return data;
 }

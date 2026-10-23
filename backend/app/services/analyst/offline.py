@@ -1,8 +1,8 @@
 """Basic mode: a deterministic analyst that needs no language model.
 
-Used when no Anthropic credential is configured and as the fallback when the
+Used when no language-model key is configured and as the fallback when the
 model is unavailable. It recognises the common requests (navigation, scenarios,
-bid odds, watchlist drafts, "why Buy now?", "what does X mean?") and answers
+bid odds, watchlist drafts, "why this outlook?", "what does X mean?") and answers
 them from the same context and tools as the LLM path, so every number is real.
 Anything else gets an honest "I can't answer that in basic mode" plus ideas.
 """
@@ -14,7 +14,7 @@ import re
 from sqlalchemy.engine import Connection
 
 from ...glossary import glossary
-from ...labels import SCENARIOS
+from .. import scenarios as sc
 from . import tools
 from .actions import Action, ActionError, validate
 from .context import AnalystContext
@@ -30,8 +30,11 @@ _DOWN = r"-|minus|less|fewer|decreases?|cuts?|lower|drops?|falls?|down|reduced?"
 
 PAGE_WORDS = [
     ("bid", r"\bbid(?:ding)?\s*planner\b|\bplanner\b|\bbid page\b"),
+    ("scenario", r"\bscenario lab\b|\bscenarios?\b|\bsupply slider\b"),
+    ("plan", r"\bmy plan\b|\bmy situation\b|\bplan page\b|\bcoe plan\b"),
     ("policy", r"\bpolicy\b|\bpolicies\b|\bpolicy lab\b|\binterventions?\b"),
-    ("model", r"\bmodel page\b|\bmodel\b|\baccuracy\b|\bevaluation\b"),
+    ("learn", r"\blearn\b|\bfaq\b|\bguide\b|\bdata sources?\b|\bmethodology\b|\bhelp page\b"),
+    ("model", r"\bmodel page\b|\bmodel\b|\baccuracy\b|\bevaluation\b|\bperformance\b"),
     ("alerts", r"\bwatch ?list\b|\balerts?\b"),
     ("overview", r"\boverview\b|\bhome\b|\bdashboard\b"),
     ("forecast", r"\bforecasts?\b|\bpredictions?\b|\bchart\b"),
@@ -56,8 +59,9 @@ GLOSSARY_KEYS = [
     ("tft", r"\btft\b|transformer"),
     ("hybrid", r"hybrid"),
     ("backtest", r"backtest|out[- ]of[- ]sample"),
-    ("conviction", r"conviction|confidence"),
-    ("prob-save", r"saves? \d+\s*%|chance waiting saves"),
+    ("uncertainty", r"model uncertainty|uncertainty level|conviction|confidence"),
+    ("prob-drop", r"drop of \d+\s*%|chance of a drop|meaningful drop"),
+    ("pqp", r"\bpqp\b|prevailing quota|renew"),
     ("effect-types", r"permanent|temporary|one-off|shift|shock"),
     ("supply-scenario", r"scenario|supply"),
     ("win-probability", r"chance of winning|win(?:ning)? probability|probability of winning"),
@@ -69,23 +73,32 @@ GLOSSARY_KEYS = [
     ("categories", r"categor(?:y|ies)|difference between cat|cat a (?:and|vs\.?|versus) cat b"),
     ("watchlist", r"watch ?list|alerts?"),
     ("premium", r"premium"),
-    ("signal", r"buy now|lean buy|\bwait\b"),
+    ("outlook", r"outlook|pressure|no clear direction|buy now|\bwait\b|should i buy"),
     ("coe", r"\bcoe\b"),
 ]
 
 PAGE_INTRO = {
     "overview": "The Overview shows today's premium for each of the five COE categories, how it moved since the "
-                "last exercise, and the model's signal for the next quota quarter.",
-    "forecast": "The Forecast page shows the premium history in the dark line and the model's forecast for the next "
-                "six exercises: the blue line is the middle estimate (median) and the shaded bands are the 50% and "
-                "80% ranges. The card on the right turns that into a Buy now / Wait call with its conviction.",
+                "last exercise, the forecast for the next exercise and the market outlook for the next quota quarter.",
+    "forecast": "The Forecast page shows the premium history as the solid line and the model's forecast for the next "
+                "six exercises: the dashed line is the middle estimate (median) and the shaded bands are the 50% and "
+                "80% ranges. The card on the right is the market outlook: which way the forecast leans, how "
+                "uncertain it is, and why.",
+    "scenario": "The Scenario Lab shows how the forecast responds if next quarter's COE quota is higher or lower "
+                "than today's. Drag the slider between -20% and +20%; the grey dashed line is the forecast as "
+                "announced, for comparison.",
+    "plan": "My plan turns the forecast into a short personal summary: tell it whether you're buying or renewing, "
+            "your category, timing and COE budget, and it shows the outlook, the forecast range, how your budget "
+            "compares and a level worth watching.",
+    "learn": "Learn explains how COE works, how COE Compass makes its forecasts, where the data comes from and "
+             "how to use each tool.",
     "bid": "The Bid planner shows your chance of winning the next exercise at any bid. Every winner pays the same "
            "premium, so bidding higher only buys certainty – it doesn't change what you pay.",
     "policy": "Policy Lab measures how past policy changes (loan curbs, quota injections, EV rules) moved premiums, "
               "after allowing for the market's normal ups and downs. Bars are estimated effects; whiskers are the "
               "uncertainty.",
-    "model": "The Model page shows how accurate the forecasts were on three years of auctions the model never saw, "
-             "compared with simpler methods like 'next premium = today's premium'.",
+    "model": "Model performance shows how accurate the forecasts were on three years of auctions the model never "
+             "saw, compared with simpler methods like 'next premium = today's premium'.",
     "alerts": "The Watchlist lets you save a target such as 'Cat A below $110,000'. It is re-scored after every "
               "bidding exercise and you see the status the next time you open the app – there are no emails.",
 }
@@ -119,18 +132,21 @@ def detect_category(text: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
-def detect_scenario(text: str) -> str | None:
+def detect_quota_pct(text: str) -> int | None:
+    """The quota change a question asks about: 'supply rises 15%' -> 15, '20% fewer COEs' -> -20."""
     t = text.lower().replace("−", "-")
     if re.search(r"as announced|base (?:case|scenario)|current quota|no change", t):
-        return "base"
+        return 0
     m = (re.search(rf"(?<![a-z])({_UP}|{_DOWN})(?![a-z])(?:\s+(?:the\s+)?(?:quota|supply|coes?))?"
-                   rf"\s*(?:by\s*)?(10|20)\s*%?", t)
-         or re.search(rf"(10|20)\s*%\s*({_UP}|{_DOWN})(?![a-z])", t))
+                   rf"\s*(?:by\s*)?(\d{{1,2}})\s*%?", t)
+         or re.search(rf"(\d{{1,2}})\s*%\s*({_UP}|{_DOWN})(?![a-z])", t))
     if not m:
         return None
-    word, size = (m.group(1), m.group(2)) if m.group(1)[0] not in "12" else (m.group(2), m.group(1))
-    up = re.fullmatch(_UP, word) is not None
-    return f"quota_{'plus' if up else 'minus'}_{size}"
+    word, size = (m.group(1), m.group(2)) if not m.group(1)[0].isdigit() else (m.group(2), m.group(1))
+    size = int(size)
+    if not 1 <= size <= sc.MAX_PCT:
+        return None
+    return size if re.fullmatch(_UP, word) else -size
 
 
 def detect_page(text: str) -> str | None:
@@ -211,15 +227,16 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                     f"Cat {cat} in the {r['exercise']} exercise (model forecast)."), [_bid_action(view, cat, amount)]
 
         # 5. Supply scenario
-        scenario = detect_scenario(q)
-        if scenario and (re.search(r"scenario|supply|quota", ql) or NAV_VERB.search(ql)):
+        pct = detect_quota_pct(q)
+        if pct is not None and (re.search(r"scenario|supply|quota", ql) or NAV_VERB.search(ql)):
             target_cat = cat or "A"
-            r = tools.run(conn, ctx, "scenario_forecast", {"category": target_cat, "scenario": scenario})
+            r = tools.run(conn, ctx, "scenario_forecast", {"category": target_cat, "quota_pct": pct})
             end = r["steps"][-1]
-            return (f"Under '{SCENARIOS[scenario]['label']}', the model's median for Cat {target_cat} in "
+            note = " (interpolated between the modelled scenarios)" if r["interpolated"] else ""
+            return (f"Under '{r['scenario']}'{note}, the model's median for Cat {target_cat} in "
                     f"{end['exercise']} is {_money(end['median'])} (80% range {_money(end['p10'])}–"
-                    f"{_money(end['p90'])}), and the call is {r['recommendation']['label']}."
-                    ), [act("set_supply_scenario", scenario=scenario, category=target_cat)]
+                    f"{_money(end['p90'])}), and the outlook is '{r['outlook']['label']}'."
+                    ), [act("set_supply_scenario", quota_pct=pct, category=target_cat)]
 
         # 6. Biggest policy impact
         if re.search(r"(biggest|largest|most|strongest).*(impact|effect|change|moved|affect)|"
@@ -230,15 +247,20 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
         page = detect_page(q)
         if NAV_VERB.search(ql) and (page or detect_category(q)):
             if page is None:
-                page = view.page if view.page in ("forecast", "bid", "policy") else "forecast"
+                page = view.page if view.page in ("forecast", "scenario", "bid", "policy") else "forecast"
             params = {"page": page}
-            if detect_category(q) or page in ("forecast", "bid"):
+            if detect_category(q) or page in ("forecast", "scenario", "bid"):
                 params["category"] = cat or "A"
             a = act("navigate", **params)
             return f"{a.summary}.", [a]
 
-        # 8. Why Buy now / Wait
-        if re.search(r"\bwhy\b", ql) and re.search(r"buy|wait|recommend|signal|saying|lean", ql):
+        # 8. Why this outlook? / Should I buy or wait?
+        if re.search(r"should i (?:buy|wait)|buy (?:now )?or wait|good time to buy", ql):
+            text, acts = _why(ctx, cat or "A")
+            return ("COE Compass doesn't tell you to buy or to wait: it forecasts the COE premium, which is only "
+                    "one part of that decision. Here is what the forecast says. " + text), acts
+        if re.search(r"\bwhy\b", ql) and re.search(
+                r"buy|wait|recommend|signal|say|show|lean|outlook|pressure|direction", ql):
             if re.search(r"\b(all|every|each|both)\b|categories", ql):
                 return _why_all(ctx)
             return _why(ctx, cat or "A")
@@ -257,8 +279,8 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
             tip = ""
             if view.page in ("forecast", "overview") and cat:
                 c = next((c for c in ctx.app_data["categories"] if c["code"] == cat), None)
-                if c and c.get("recommendation"):
-                    tip = f" For Cat {cat} right now: {c['recommendation']['summary']}"
+                if c and c.get("outlook"):
+                    tip = f" For Cat {cat} right now: {c['outlook']['summary']}"
             return intro + tip, []
 
         # 12. Glossary
@@ -277,7 +299,7 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
         "I can't answer that in basic mode – the AI model isn't available on this server right now. I can still: "
         "open pages ('show me Cat E'), try supply scenarios ('what if supply rises 10%?'), work out bids "
         "('how much should I bid for a 90% chance on Cat A?'), explain terms ('what does n.s. mean?'), explain "
-        "a recommendation ('why is Cat A saying Buy now?') or draft a watchlist target "
+        "an outlook ('why is Cat A showing no clear direction?') or draft a watchlist target "
         "('watch Cat B below $120k')."), []
 
 
@@ -296,41 +318,46 @@ def _category_entry(ctx: AnalystContext, cat: str) -> dict:
 
 def _why(ctx: AnalystContext, cat: str):
     c = _category_entry(ctx, cat)
-    rec = c.get("recommendation")
+    rec = c.get("outlook")
     if not rec:
         return f"There's no forecast for Cat {cat} yet.", []
-    t = ctx.app_data["recommendation_rule"]["wait_threshold_pct"]
+    rule = ctx.app_data["outlook_rule"]
     fc = c["forecast_as_announced"]["end_of_quarter"]
     latest = c["latest_result"]
-    text = (f"Cat {cat} shows {rec['label']} ({rec['conviction']} conviction). The latest premium was "
-            f"{_money(latest['premium'])} ({latest['exercise']}); the model's median for {fc['exercise']} is "
-            f"{_money(fc['median'])} ({rec['expected_change_pct']:+.1f}%). The app only says Wait when the median is "
-            f"at least {t}% below today, and the estimated chance of a drop that big is "
-            f"{rec['prob_save_threshold_pct']:.0f}%. ")
-    if rec["action"] == "buy_now" and rec["conviction"] != "high":
-        text += (f"Prices are about as likely to fall as rise ({rec['prob_lower_pct']:.0f}% chance lower), so "
-                 f"this is a weak call: waiting isn't expected to save much, not a prediction that prices will jump.")
-    elif rec["action"] == "buy_now":
-        text += f"The model sees a {rec['prob_higher_pct']:.0f}% chance the premium is higher by then."
+    text = (f"Cat {cat} shows '{rec['label']}'. The latest premium was {_money(latest['premium'])} "
+            f"({latest['exercise']}); the model's median for {fc['exercise']} is {_money(fc['median'])} "
+            f"({rec['expected_change_pct']:+.1f}%), with a {rec['prob_lower_pct']:.0f}% chance the premium is lower "
+            f"by then and a {rec['prob_higher_pct']:.0f}% chance it is higher. ")
+    if rec["strength"] == "none":
+        text += (f"Neither side reaches the {rule['slight_direction_from_pct']}% the app needs before it calls a "
+                 f"direction, so this is close to a coin flip, not a prediction that prices will hold. ")
+    else:
+        text += (f"The app calls a slight direction from {rule['slight_direction_from_pct']}% and a clear one from "
+                 f"{rule['clear_direction_from_pct']}%. ")
+    text += (f"A drop of {rule['meaningful_drop_pct']}% or more has a {rec['prob_meaningful_drop_pct']:.0f}% chance. "
+             f"Model uncertainty is {rec['model_uncertainty']}.")
     return text, [validate("highlight", {"target": "recommendation"})] if ctx.view.page == "forecast" else []
 
 
 def _why_all(ctx: AnalystContext):
-    cats = [c for c in ctx.app_data["categories"] if c.get("recommendation")]
+    cats = [c for c in ctx.app_data["categories"] if c.get("outlook")]
     if not cats:
         return "There are no forecasts yet.", []
-    t = ctx.app_data["recommendation_rule"]["wait_threshold_pct"]
-    labels = {c["recommendation"]["label"] for c in cats}
-    lines = [f"- {c['name']}: {c['recommendation']['label']}, median {c['recommendation']['expected_change_pct']:+.1f}% "
-             f"by the end of the quarter, {c['recommendation']['prob_save_threshold_pct']:.0f}% chance it drops {t}% or more"
+    rule = ctx.app_data["outlook_rule"]
+    labels = {c["outlook"]["label"] for c in cats}
+    lines = [f"- {c['name']}: {c['outlook']['label']}, median {c['outlook']['expected_change_pct']:+.1f}% by the end "
+             f"of the quarter, {c['outlook']['prob_lower_pct']:.0f}% chance lower, "
+             f"{c['outlook']['prob_meaningful_drop_pct']:.0f}% chance it drops {rule['meaningful_drop_pct']}% or more"
              for c in cats]
     if len(labels) == 1:
-        head = (f"All {len(cats)} categories show {labels.pop()} because none of the model's medians is {t}% or more "
-                f"below today's premium, which is what the app needs before it says Wait.")
+        head = (f"All {len(cats)} categories show '{labels.pop()}' because in each one the odds of a higher and of a "
+                f"lower premium are both under {rule['slight_direction_from_pct']}%, which is what the app needs "
+                f"before it calls a direction.")
     else:
-        head = f"The categories differ; the app says Wait only when the median is at least {t}% below today's premium."
-    tail = ("COE premiums move close to a random walk, so the model rarely forecasts a big drop. Low conviction "
-            "means the direction is close to a coin flip, not that prices are sure to rise.")
+        head = (f"The categories differ; the app calls a direction only when the odds of a higher or lower premium "
+                f"reach {rule['slight_direction_from_pct']}%.")
+    tail = ("COE premiums move close to a random walk, so the model rarely forecasts a big move. 'No clear "
+            "direction' means the direction is close to a coin flip, not that prices are sure to stay put.")
     return head + "\n\n" + "\n".join(lines) + "\n\n" + tail, []
 
 
@@ -376,11 +403,11 @@ def _biggest_policy(ctx: AnalystContext, cat: str):
 
 
 def _quota_effect(conn: Connection, ctx: AnalystContext, cat: str):
-    lo = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "scenario": "quota_minus_20"})
-    hi = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "scenario": "quota_plus_20"})
+    lo = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "quota_pct": -20})
+    hi = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "quota_pct": 20})
     a, b = lo["steps"][-1], hi["steps"][-1]
     return (f"In general, more COEs for the same demand means lower premiums. In this model, for Cat {cat} by "
             f"{a['exercise']}: with 20% less supply the median is {_money(a['median'])}; with 20% more supply it is "
             f"{_money(b['median'])}. That's the model's estimate of the quota effect, alongside everything else it "
-            f"looks at."), [validate("set_supply_scenario", {"scenario": "quota_plus_20", "category": cat})]
+            f"looks at."), [validate("set_supply_scenario", {"quota_pct": 20, "category": cat})]
 

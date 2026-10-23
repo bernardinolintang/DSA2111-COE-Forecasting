@@ -7,28 +7,23 @@
 // The controls (slider, text box) respond instantly; what they drive is smoothed
 // separately: the probability interpolates and the chart marker glides along
 // the curve (only the marker is redrawn). A category change morphs the curve.
+//
+// A probability alone does not help anyone decide, so the planner also says in
+// words where the bid sits in the forecast, and shows the chance at nearby bids.
 
 import { api } from "../api.js";
 import { lineChart } from "../charts.js";
 import { replaceHash, setPageActions, setView } from "../context.js";
+import { bidLadder, explainBid, winProbability } from "../forecast-math.js";
 import { explain } from "../glossary.js";
 import { DURATION, animateNumber, lerp, reducedMotion, swap, tween } from "../motion.js";
 import { buildHash } from "../route.js";
-import { CATEGORY_CODES, errorBox, html, money, moneyShort, mount, onSegment, parseMoney, segmented } from "../util.js";
+import {
+  CATEGORY_CODES, errorBox, forecastId, html, money, moneyShort, mount, onSegment, parseMoney, provenance, segmented,
+} from "../util.js";
 
 const MAX_BID = 999_999;
 const shownProb = (p) => (p > 99.5 ? ">99" : p < 0.5 ? "<1" : String(Math.round(p)));
-
-/** P(win) for a bid, by linear interpolation on the planner's curve (0-100). */
-export function winProbability(curve, bid) {
-  if (!curve.length) return 0;
-  if (bid <= curve[0].bid) return 0;
-  if (bid >= curve[curve.length - 1].bid) return 100;
-  const i = curve.findIndex((p) => p.bid >= bid);
-  const a = curve[i - 1];
-  const b = curve[i];
-  return a.probability_pct + ((bid - a.bid) / (b.bid - a.bid)) * (b.probability_pct - a.probability_pct);
-}
 
 export async function render(root, { category = "A", query = {} } = {}, page = {}) {
   const categories = await api.get("/categories");
@@ -62,6 +57,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
 
   // ---- planner state ----
   let plan = null;
+  let summary = null;            // for the forecast details line (model run, data through)
   let curve = [];
   let lo = 0;
   let hi = 1;
@@ -84,12 +80,17 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
           aria-describedby="bid-error" aria-label="Bid amount in dollars"></div>
         <p class="field-error" id="bid-error" role="alert" hidden></p>
         <input class="range" id="bid-range" type="range" step="100" aria-label="Bid amount slider">
+        <div class="range-ends" aria-hidden="true"><span>Lower chance of winning</span><span>Higher chance</span></div>
         <div class="bid-hero mt-24">
+          <div class="fig-label">Estimated chance this bid wins</div>
           <div class="prob-figure" id="prob" aria-live="polite"><span class="prob-num">–</span><small>%</small></div>
           <p class="muted" id="prob-text"></p>
         </div>
+        <p class="bid-explain mt-16" id="bid-explain" aria-live="polite"></p>
         <p class="small muted mt-16">Expected premium (median): <strong id="bid-expected"></strong>. If you win, that is roughly what you pay, whatever you bid.</p>
-        <p class="small mt-8 muted">Suggested reserve prices:</p>
+        <h3 class="why-title mt-24">Explore nearby bids</h3>
+        <div class="ladder mt-8" id="bid-ladder" role="group" aria-label="Nearby bids and their estimated chance of winning"></div>
+        <h3 class="why-title mt-24">Bids for a chosen chance of winning</h3>
         <div class="chips mt-8" id="bid-chips" data-anchor="bid-suggestions"></div>
       </div>
       <div class="card card-lg" data-anchor="bid-chart">
@@ -97,11 +98,13 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
           <p class="card-sub" id="cdf-sub"></p></div></div>
         <div id="cdf"></div>
         <p class="caption mt-16">A higher bid does not change what you pay, but you commit to paying up to it if the premium spikes. The bid deposit and the rules for your category apply. Estimates, not guarantees.</p>
+        <div id="bid-provenance"></div>
       </div>`);
     const $ = (s) => planner.querySelector(s);
     els = { eyebrow: $("#bid-eyebrow"), input: $("#bid-input"), range: $("#bid-range"), error: $("#bid-error"),
             prob: $("#prob"), probNum: $(".prob-num"), probText: $("#prob-text"), expected: $("#bid-expected"),
-            chips: $("#bid-chips"), cdfSub: $("#cdf-sub"), cdf: $("#cdf") };
+            chips: $("#bid-chips"), cdfSub: $("#cdf-sub"), cdf: $("#cdf"), explain: $("#bid-explain"),
+            ladder: $("#bid-ladder"), provenance: $("#bid-provenance") };
 
     els.range.addEventListener("input", () => set(+els.range.value, { duration: DURATION.micro }));
     els.input.addEventListener("input", () => {
@@ -118,6 +121,26 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       const b = e.target.closest("[data-bid]");
       if (b) set(+b.dataset.bid);
     });
+    els.ladder.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-ladder]");
+      if (b) set(+b.dataset.ladder);
+    });
+  }
+
+  /** "$98,000 → 41%": the chance at round bids either side of the current one. */
+  function paintLadder(bid) {
+    // Only redrawn when it changes: leaving the text box re-applies the same bid, and
+    // replacing the rows then would swallow a click on one of them.
+    const key = `${state.category}|${plan.exercise.label}|${bid}`;
+    if (els.ladder.dataset.key === key) return;
+    els.ladder.dataset.key = key;
+    mount(els.ladder, html`${bidLadder(curve, bid, plan.expected_premium).map((r) => html`
+      <button type="button" class="ladder-row" data-ladder="${r.bid}"${r.current ? html` aria-current="true"` : ""}
+        aria-label="${money(r.bid)}: ${shownProb(r.probability)}% chance${r.current ? " (your bid)" : ""}">
+        <span class="ladder-bid">${money(r.bid)}</span>
+        <span class="ladder-track" aria-hidden="true"><span style="width:${Math.max(1, Math.min(100, r.probability))}%"></span></span>
+        <span class="ladder-prob">${shownProb(r.probability)}%</span>
+      </button>`)}`);
   }
 
   const marker = (bid) => [{ x: clamp(bid), y: prob(clamp(bid)), color: "var(--accent)", guides: true }];
@@ -144,6 +167,8 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     const p = prob(bid);
     animateNumber(els.probNum, p, { format: shownProb, duration, animate });
     els.probText.textContent = `chance that a ${money(bid)} bid is at or above the ${plan.exercise.label} premium.`;
+    els.explain.textContent = explainBid(plan, bid, money);
+    paintLadder(bid);
     if (moveChart) moveMarker(bid, duration);
     showError(null);
     clearTimeout(hashTimer);                  // browsers throttle rapid history updates
@@ -185,6 +210,8 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
           <div class="chip-top">${s.confidence_pct}% chance</div><div class="chip-val">${money(s.bid)}</div></button>`)}`);
     }, { key: meta.code, animate });
     els.cdfSub.textContent = `Probability that the premium ends at or below each bid, from the forecast for ${plan.exercise.label}.`;
+    mount(els.provenance, summary?.run ? provenance({ run: summary.run, dataThrough: summary.data_through?.label,
+                                                      id: forecastId(state.category, plan.exercise, summary.run) }) : "");
 
     const initial = parseMoney(bidQuery ?? "", { min: 1, max: MAX_BID });
     const bid = Math.round(initial.ok ? initial.value : plan.bid);
@@ -213,7 +240,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     planner.classList.add("is-loading");
     let next;
     try {
-      next = await api.get(`/bid-planner/${cat}`);
+      [next, summary] = await Promise.all([api.get(`/bid-planner/${cat}`), api.get("/summary").catch(() => null)]);
       if (!next.curve?.length) throw new Error("No forecast is available for this category yet.");
     } catch (err) {
       if (token !== loadToken || !root.isConnected) return;

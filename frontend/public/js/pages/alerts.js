@@ -54,7 +54,7 @@ export async function render(root) {
     <section class="container page-head page-enter">
       <p class="eyebrow">Watchlist</p>
       <h1 class="headline">Watch a target price.</h1>
-      <p class="subtitle">Save the premium you're waiting for. After every bidding exercise we re-score each target against the new forecast, and flag any change the next time you open COE Forecast.</p>
+      <p class="subtitle">Save the premium you're watching for. After every bidding exercise each target is re-scored against the new forecast, and any change is flagged the next time you open COE Compass.</p>
     </section>
     <section class="container">
       <form class="card card-lg mt-24" id="alert-form" novalidate data-anchor="watchlist-form">
@@ -72,7 +72,7 @@ export async function render(root) {
           <button class="btn" type="submit" id="a-submit" disabled>Add to watchlist</button>
         </div>
         <p class="caption mt-16">No sign-up: your watchlist is linked to a random ID stored in this browser, and no personal data is kept.
-          There are no emails or push messages — you'll see updates here and a notice when you next open the app. ${explain("watchlist", "watchlist")}</p>
+          There are no emails or push messages: you'll see updates here and a notice when you next open the app. ${explain("watchlist", "watchlist")}</p>
       </form>
 
       <div class="card mt-24 notify-card">
@@ -133,7 +133,8 @@ export async function render(root) {
       const settle = animate ? flip(list, "data-alert") : null;
       const wasEmpty = !list.querySelector("[data-alert]");
       mount(list, alerts.length ? html`${alerts.map(alertCard)}`
-        : html`<div class="card empty">${raw(`<div style="width:36px;height:36px;margin:0 auto 12px;color:var(--ink-3)">${ICONS.bell}</div>`)}Nothing on your watchlist yet. Add a target above.</div>`);
+        : html`<div class="card empty"><div class="empty-icon">${raw(ICONS.bell)}</div>Nothing on your watchlist yet. Add a target above,
+            or let <a href="#/plan">My plan</a> suggest a level worth watching.</div>`);
       settle?.();
       if (animate && !alerts.length && !wasEmpty) enter(list.firstElementChild, { rise: 0 });
       markSeen(alerts);
@@ -218,7 +219,7 @@ export async function render(root) {
     }
   });
 
-  // Browser notifications: optional, only while COE Forecast is open in a tab.
+  // Browser notifications: optional, only while COE Compass is open in a tab.
   const notifyText = root.querySelector("#notify-text");
   const notifyBtn = root.querySelector("#notify-toggle");
   function paintNotify() {
@@ -231,8 +232,8 @@ export async function render(root) {
     const blocked = Notification.permission === "denied";
     notifyText.textContent = blocked
       ? "Notifications are blocked for this site in your browser settings."
-      : on ? "On: while COE Forecast is open in a tab, we'll show a notification when a target becomes likely or is reached."
-      : "Off. Turn on to get a browser notification when a target becomes likely or is reached — only while COE Forecast is open in a tab.";
+      : on ? "On: while COE Compass is open in a tab, we'll show a notification when a target becomes likely or is reached."
+      : "Off. Turn on to get a browser notification when a target becomes likely or is reached, only while COE Compass is open in a tab.";
     notifyBtn.textContent = on ? "Turn off" : "Turn on";
     notifyBtn.disabled = blocked;
   }

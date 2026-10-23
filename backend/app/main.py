@@ -1,4 +1,4 @@
-"""FastAPI application: the REST API behind the COE Forecast web app.
+"""FastAPI application: the REST API behind the COE Compass web app.
 
 Run locally:   uvicorn app.main:app --reload
 Docs:          http://localhost:8000/api/docs
@@ -30,9 +30,10 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="COE Forecast API",
+    title="COE Compass API",
     description="Policy-aware probabilistic forecasts of Singapore COE premiums "
-                "(Box-Tiao intervention analysis + Temporal Fusion Transformer).",
+                "(Box-Tiao intervention analysis + Temporal Fusion Transformer). An independent "
+                "decision-support service built on public data; not affiliated with LTA.",
     version=settings.version,
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",

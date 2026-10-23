@@ -7,7 +7,7 @@ import { replaceHash, setView } from "../context.js";
 import { explain } from "../glossary.js";
 import { swap } from "../motion.js";
 import {
-  CATEGORY_CODES, errorBox, exerciseDate, html, money, moneyShort, mount, onSegment, pct, raw, segmented, timeAgo,
+  CATEGORY_CODES, errorBox, exerciseDate, html, money, moneyShort, mount, onSegment, pct, provenance, raw, segmented, timeAgo,
 } from "../util.js";
 
 // Fixed identity colours for the three models compared by horizon.
@@ -60,7 +60,7 @@ function trustSummary(board, byH, dm) {
 export async function render(root, { query = {} } = {}) {
   mount(root, html`
     <section class="container page-head page-enter">
-      <p class="eyebrow">Under the hood</p>
+      <p class="eyebrow">Learn · Model performance</p>
       <h1 class="headline">Honest numbers.</h1>
       <p class="subtitle">Every model is scored on the last three years of auctions it never saw, re-forecasting from every bidding exercise. COE premiums are close to a random walk, so that is the bar to clear.</p>
     </section>
@@ -88,6 +88,10 @@ export async function render(root, { query = {} } = {}) {
       <h2 class="title">Why should I trust this model?</h2>
       <p class="card-sub">Scored on ${metrics.test_period.exercises || "held-out"} bidding exercises${testStart ? ` from ${testStart.month}` : ""} that the model never saw while training.</p>
       ${trustSummary(board, metrics.by_horizon, dm)}
+      ${provenance({ run: metrics.run, dataThrough: metrics.run.data_through
+        ? `${metrics.run.data_through.slice(0, 7)} · ${metrics.run.last_bidding === 1 ? "1st" : "2nd"}` : null })}
+      <p class="mt-16 row"><a class="link-arrow" href="#/learn/how">How the forecasts are made</a>
+        <a class="link-arrow" href="#/learn/sources">Data sources</a></p>
     </div>
 
     <details class="tech-section mt-24" id="technical"${query.section === "technical" ? " open" : ""}>

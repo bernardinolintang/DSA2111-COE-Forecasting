@@ -1,5 +1,6 @@
 // Small helpers shared by every page: safe HTML templating, number formatting,
-// dates, and per-viewer storage.
+// dates, per-viewer storage, and the few components every page uses (outlook
+// pill, driver chips, forecast details line, notices).
 
 import { attachThumb } from "./motion.js";
 
@@ -52,6 +53,9 @@ export function moneyShort(v) {
   return `$${Math.round(v)}`;
 }
 
+/** "$126k–$142k", or "—" when either end is missing. */
+export const rangeShort = (lo, hi) => (bad(lo) || bad(hi) ? "—" : `${moneyShort(lo)}–${moneyShort(hi)}`);
+
 export function pct(v, { sign = true, digits = 1 } = {}) {
   if (bad(v)) return "—";
   const s = digits === 1 ? nf1.format(Math.abs(v)) : nf0.format(Math.abs(v));
@@ -100,6 +104,22 @@ export function timeAgo(iso) {
   return `${Math.round(s / 86400)} days ago`;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const sgtParts = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Singapore", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+/**
+ * A timestamp in Singapore time, e.g. "30 Sep 2026, 23:09 SGT" (year: false drops the year).
+ * Month names are fixed here so they match the exercise labels in every browser locale.
+ */
+export function sgt(iso, { year = true } = {}) {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return "—";
+  const p = Object.fromEntries(sgtParts.formatToParts(d).map((x) => [x.type, x.value]));
+  return `${Number(p.day)} ${MONTHS[Number(p.month) - 1]}${year ? ` ${p.year}` : ""}, ${p.hour}:${p.minute} SGT`;
+}
+
 // ---------------------------------------------------------------------------
 // Per-viewer storage. Can throw (private mode, blocked storage), so always guarded.
 // ---------------------------------------------------------------------------
@@ -136,30 +156,80 @@ export function toast(message) {
 export const CATEGORY_CODES = ["A", "B", "C", "D", "E"];
 export const catColor = (code) => `var(--cat-${code})`;
 
-// Inline icons (SF Symbols-like strokes).
+// Inline icons (simple strokes).
+const icon = (body, { size = 18, width = 2 } = {}) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 export const ICONS = {
-  check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>`,
-  clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
-  sun: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`,
-  moon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`,
-  trash: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>`,
-  bell: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>`,
-  help: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17.2h.01"/></svg>`,
-  sparkle: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>`,
-  close: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
-  send: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>`,
+  check: icon('<path d="M5 12.5l4.2 4.2L19 7"/>', { width: 2.4 }),
+  clock: icon('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', { width: 2.2 }),
+  sun: icon('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: icon('<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>'),
+  trash: icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),
+  bell: icon('<path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/>', { width: 2.2 }),
+  help: icon('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6"/><path d="M12 17.2h.01"/>'),
+  sparkle: icon('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
+  close: icon('<path d="M6 6l12 12M18 6L6 18"/>', { width: 2.2 }),
+  send: icon('<path d="M5 12h13M13 6l6 6-6 6"/>', { width: 2.2 }),
+  up: icon('<path d="M6 17L17 6M9 6h8v8"/>', { width: 2.4 }),
+  down: icon('<path d="M6 7l11 11M17 10v8H9"/>', { width: 2.4 }),
+  flat: icon('<path d="M4 12h16M14 6l6 6-6 6"/>', { width: 2.4 }),
+  car: icon('<path d="M4 16v-3.5l2-5A2 2 0 0 1 7.9 6h8.2a2 2 0 0 1 1.9 1.5l2 5V16"/><path d="M3 16h18v2H3zM4 12.5h16"/><path d="M7 18v1.5M17 18v1.5"/>'),
+  renew: icon('<path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5"/><path d="M4 20v-4.5h4.5"/>'),
+  gavel: icon('<path d="M13.5 5.5l5 5M10 9l5 5M11.8 3.8l8.4 8.4M8.3 7.3l8.4 8.4M9.5 12.5L3.5 18.5a1.4 1.4 0 0 0 2 2l6-6M13 21h8"/>'),
+  chart: icon('<path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5L19 8"/>'),
 };
 
-export const CONVICTION = { high: "High conviction", medium: "Medium conviction", low: "Low conviction" };
+// ---------------------------------------------------------------------------
+// Market outlook: which way the forecast leans, and how clearly. Never advice.
+// ---------------------------------------------------------------------------
+const TREND_WORD = { up: "up", down: "down", flat: "steady" };
+export const UNCERTAINTY = { low: "Low", moderate: "Moderate", high: "High" };
 
-/** The signal worded by conviction: a weak call is visibly weaker than a strong one. */
-export function signalPill(signal) {
+/** The outlook as a pill: arrow + words; a slight lean is outlined, a clear one filled. */
+export function outlookPill(signal) {
   if (!signal) return html`<span class="pill pill-neutral">No forecast</span>`;
-  const wait = signal.action === "wait";
-  const strong = signal.conviction === "high";
-  const label = signal.label || (wait ? "Wait" : "Buy now");
-  const cls = `pill ${wait ? "pill-wait" : "pill-buy"}${strong ? "" : " pill-soft"}`;
-  return html`<span class="${cls}" title="${CONVICTION[signal.conviction] || ""}">${raw(wait ? ICONS.clock : ICONS.check)}${label}</span>`;
+  const cls = `pill pill-${signal.direction}${signal.strength === "slight" ? " pill-soft" : ""}`;
+  return html`<span class="${cls}" title="${signal.summary || ""}">${raw(ICONS[signal.direction] || ICONS.flat)}${signal.label}</span>`;
+}
+
+/** A driver in a few words, e.g. "Quota down 6% on a year ago". */
+export function driverText(d) {
+  if (d.key === "quota") {
+    return d.trend === "flat" ? "Quota steady on a year ago" : `Quota ${TREND_WORD[d.trend]} ${Math.abs(Math.round(d.value))}% on a year ago`;
+  }
+  if (d.key === "demand") {
+    return d.trend === "flat" ? "Demand in line with its 1-year average" : `Demand ${d.trend === "up" ? "above" : "below"} its 1-year average`;
+  }
+  return `${UNCERTAINTY[d.trend] || d.trend} uncertainty`;
+}
+
+/** The "why" behind an outlook as short chips; the full sentence is the tooltip. */
+export function driverChips(drivers = []) {
+  const short = (d) => (d.key === "quota" ? `Quota ${d.trend === "flat" ? "steady" : `${d.trend === "up" ? "↑" : "↓"}${Math.abs(Math.round(d.value))}%`}`
+    : d.key === "demand" ? `Demand ${d.trend === "up" ? "↑" : d.trend === "down" ? "↓" : "steady"}`
+    : `Uncertainty ${d.trend}`);
+  return html`<ul class="drivers" aria-label="What is behind this outlook">${drivers.map((d) =>
+    html`<li class="driver" title="${d.title}: ${d.text}"><span class="visually-hidden">${driverText(d)}. </span><span aria-hidden="true">${short(d)}</span></li>`)}</ul>`;
+}
+
+/**
+ * Where a forecast came from: when it was produced, the last result it includes,
+ * the model run and the source. Shown under every forecast.
+ */
+export function forecastId(category, step, run) {
+  if (!category || !step || !run) return null;
+  return `${category}-${String(step.month).slice(0, 7)}-E${step.bidding_no}-r${run.id}`;
+}
+
+export function provenance({ run, dataThrough, id = null } = {}) {
+  if (!run) return html`<p class="provenance">Forecast details unavailable.</p>`;
+  return html`<dl class="provenance" aria-label="Forecast details">
+    <div><dt>Last updated</dt><dd>${sgt(run.finished_at || run.created_at)}</dd></div>
+    ${dataThrough ? html`<div><dt>Data through</dt><dd>${dataThrough}</dd></div>` : ""}
+    <div><dt>Model</dt><dd>Hybrid TFT + Box-Tiao · run #${run.id}</dd></div>
+    ${id ? html`<div><dt>Forecast ID</dt><dd class="mono">${id}</dd></div>` : ""}
+    <div><dt>Source</dt><dd>LTA via data.gov.sg · <a href="#/learn/sources">View data sources</a></dd></div>
+  </dl>`;
 }
 
 export function segmented(name, options, active, label) {
@@ -185,6 +255,17 @@ export function onSegment(root, name, onChange) {
   });
 }
 
-export function errorBox(err) {
-  return html`<div class="error-box">${err?.message || "Something went wrong."}</div>`;
+// ---------------------------------------------------------------------------
+// States: a page never shows a blank where data should be.
+// ---------------------------------------------------------------------------
+/** A calm notice: what happened, what still works, and (optionally) what to do. */
+export function noticeBox({ title, body = "", tone = "info", retry = false }) {
+  return html`<div class="notice notice-${tone}" role="${tone === "error" ? "alert" : "status"}">
+    <div><strong>${title}</strong>${body ? html`<p>${body}</p>` : ""}</div>
+    ${retry ? html`<button type="button" class="btn btn-ghost btn-sm" data-reload>Try again</button>` : ""}
+  </div>`;
+}
+
+export function errorBox(err, title = "This couldn't be loaded") {
+  return noticeBox({ title, body: err?.message || "Something went wrong.", tone: "error", retry: true });
 }
