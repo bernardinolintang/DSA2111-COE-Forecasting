@@ -1,0 +1,6 @@
+{
+  "offline": true,
+  "seeds": 1,
+  "workers": 4,
+  "data_through": "2026-09-01 00:00:00"
+}

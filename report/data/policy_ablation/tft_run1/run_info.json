@@ -1,0 +1,10 @@
+{
+  "offline": true,
+  "seeds": 3,
+  "workers": 4,
+  "epochs": {
+    "tft": 2,
+    "tft_no_policy": 3
+  },
+  "data_through": "2026-09-01 00:00:00"
+}
