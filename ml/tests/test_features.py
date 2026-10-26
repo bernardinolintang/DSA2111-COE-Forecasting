@@ -6,8 +6,8 @@ import pytest
 
 from coe_ml.config import CATEGORIES
 from coe_ml.evaluation import summarise
-from coe_ml.features import (TargetScaler, add_known_features, extend_with_future, next_exercises,
-                             quota_quarter)
+from coe_ml.features import (TargetScaler, add_known_features, extend_with_future, macro_features,
+                             next_exercises, quota_quarter)
 from coe_ml.interventions import select_and_fit
 
 
@@ -51,6 +51,26 @@ def test_policy_dummies_only_hit_affected_categories():
     assert row.loc["A", "pol_ev_reclassification_2022"] == 1.0
     assert row.loc["D", "pol_ev_reclassification_2022"] == 0.0
     assert (row["pol_quota_injection_2025"] == 1.0).all()
+
+
+def test_macro_features_respect_publication_lags():
+    """At a bidding month m the model may only use CPI of m-2 (released ~23rd of m-1),
+    SORA of m-1 and GDP of a quarter that ended at least two months earlier."""
+    months = pd.date_range("2020-01-01", periods=36, freq="MS")
+    k = np.arange(len(months), dtype=float)
+    macro = pd.concat([
+        pd.DataFrame({"month": months, "indicator": "cpi_all_items", "value": 100.0 + k}),
+        pd.DataFrame({"month": months, "indicator": "sora_3m", "value": k}),
+        pd.DataFrame({"month": months[2::3], "indicator": "gdp_real", "value": 1000.0 + k[2::3]}),
+    ])
+    out = macro_features(macro).set_index("month")
+    june = pd.Timestamp("2022-06-01")
+    i = months.get_loc(june)
+    assert out.loc[june, "cpi_yoy"] == pytest.approx(((100 + i - 2) / (100 + i - 14) - 1) * 100)
+    assert out.loc[june, "sora_3m"] == i - 1
+    q1, q4 = months.get_loc(pd.Timestamp("2022-03-01")), months.get_loc(pd.Timestamp("2021-12-01"))
+    assert out.loc[june, "gdp_yoy"] == pytest.approx(((1000 + q1) / (1000 + q1 - 12) - 1) * 100)
+    assert out.loc[pd.Timestamp("2022-04-01"), "gdp_yoy"] == pytest.approx(((1000 + q4) / (1000 + q4 - 12) - 1) * 100)
 
 
 def test_target_scaler_round_trip():

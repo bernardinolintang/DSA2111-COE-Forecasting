@@ -100,8 +100,8 @@ class PipelineConfig:
     # Worker processes for the embarrassingly-parallel parts of the pipeline
     # (one Box-Tiao / ARIMA fit per category, one model per training job).
     n_workers: int = int(os.getenv("COE_WORKERS", max(1, min(5, (os.cpu_count() or 2) - 1))))
-    # Wait / Buy threshold from the proposal: "wait" when the median forecast
-    # for next quarter is more than 8% below today's premium.
+    # Size of a drop the proposal treats as meaningful (8%). Recorded with each run;
+    # the API uses it for the outlook's "chance of a drop of 8% or more".
     wait_threshold: float = 0.08
 
 

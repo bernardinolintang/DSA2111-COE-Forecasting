@@ -164,9 +164,12 @@ def build_panel(coe: pd.DataFrame, macro: pd.DataFrame) -> pd.DataFrame:
 def macro_features(macro: pd.DataFrame) -> pd.DataFrame:
     """Monthly macro features, lagged by their publication delay.
 
-    CPI and SORA for month m are published during month m+1, and GDP for a
-    quarter about two months after it ends. Lagging prevents the model from
-    "seeing" statistics that were not public at the time of the auction.
+    Bidding exercises close around days 3-9 and 17-23 of the month. CPI for
+    month m is released around the 23rd of month m+1, after both exercises, so
+    it is first usable in month m+2. SORA for month m is public as soon as the
+    month ends (usable in m+1), and GDP for a quarter about two months after it
+    ends. Lagging prevents the model from "seeing" statistics that were not
+    public at the time of the auction.
     """
     wide = macro.pivot_table(index="month", columns="indicator", values="value")
     wide.index = pd.to_datetime(wide.index)
@@ -174,7 +177,7 @@ def macro_features(macro: pd.DataFrame) -> pd.DataFrame:
 
     cpi = monthly["cpi_all_items"]
     out = pd.DataFrame(index=monthly.index)
-    out["cpi_yoy"] = (cpi / cpi.shift(12) - 1.0).mul(100).shift(1)
+    out["cpi_yoy"] = (cpi / cpi.shift(12) - 1.0).mul(100).shift(2)
     out["sora_3m"] = monthly["sora_3m"].shift(1)
     gdp = monthly["gdp_real"].dropna()            # quarter-end months only
     gdp_yoy = (gdp / gdp.shift(4) - 1.0).mul(100)

@@ -37,7 +37,8 @@ def analyst_provider() -> str:
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg://coe:coe_password@localhost:5432/coe")
-    # "Wait" when the median forecast for next quarter is at least this much below today's premium.
+    # Size of a drop that counts as meaningful (the outlook's "chance of a drop of 8% or more").
+    # The variable keeps its original name; the app never issues a buy / wait call.
     wait_threshold: float = float(os.getenv("WAIT_THRESHOLD", "0.08"))
     cors_origins: list[str] = field(default_factory=lambda: _csv(os.getenv("CORS_ORIGINS", "*")))
     max_alerts_per_client: int = int(os.getenv("MAX_ALERTS_PER_CLIENT", "20"))

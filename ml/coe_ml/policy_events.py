@@ -111,10 +111,12 @@ POLICY_EVENTS: list[PolicyEvent] = [
         kind="step",
         categories="AB",
         description=(
-            "About 6,000 expiring 5-year COEs were brought forward from May 2023 and the "
-            "quota formula moved to a four-quarter moving average of de-registrations."
+            "A one-time adjustment from the second May 2023 exercise brought forward about "
+            "6,000 expiring 5-year COEs and spread them over the next few quarters (Cat A quota "
+            "+24%, Cat B +15% for the rest of the quarter). It followed the move, from Feb 2023, "
+            "to a four-quarter rolling average of de-registrations."
         ),
-        source_url="https://www.lta.gov.sg/content/ltagov/en/newsroom/2023/4/news-releases/coe_quota_for_May23-Jul23.html",
+        source_url="https://lta.gov.sg/content/ltagov/en/newsroom/2023/5/news-releases/one-time_adjustment_to_reduce_volatility.html",
     ),
     PolicyEvent(
         code="quota_injection_2025",

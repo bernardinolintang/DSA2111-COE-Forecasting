@@ -10,8 +10,8 @@ const OUT = process.argv[2] || path.join(__dirname, "..", "figures");
 const BASE = process.env.E2E_BASE_URL || "http://localhost:8080";
 // [file name, route, vertical scroll in CSS pixels]
 const PAGES = [
-  ["ui_forecast", "#/forecast/A", 372],
-  ["ui_bid", "#/bid/A", 250],
+  ["ui_forecast", "#/forecast/A", 300],      // key figures with the market outlook, then the fan chart
+  ["ui_bid", "#/bid/A", 360],
 ];
 
 (async () => {

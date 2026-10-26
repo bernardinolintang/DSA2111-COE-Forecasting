@@ -88,6 +88,16 @@ Differences from the original paper, and why:
   for the rest of the current quota quarter, then persistence.
 * **Epoch selection:** rolling time-series cross-validation with three one-year folds before the test
   period; learning curves are averaged over folds and seeds.
+* **Publication lags:** at a bidding exercise in month m the model sees CPI up to m−2 (CPI is released
+  around the 23rd of the next month, after both exercises), SORA up to m−1 and GDP for quarters that
+  ended at least two months earlier. Pinned by `test_macro_features_respect_publication_lags`.
+* **Leakage test:** `ml/scripts/leakage_test.py` multiplies every premium, bid count and quota after a
+  cut-off in the middle of the test period, and every macro value from that month on, by random noise and
+  reruns the backtest. Forecasts made up to the cut-off must be bit-identical (1,260 of 1,260 are); as a
+  control, all 900 later forecasts change. `ml/notebooks/fairness_checks.ipynb` walks through it.
+* **Hyper-parameter tuning:** `ml/scripts/tune.py` scores candidates on the three years *before* the test
+  period. (The defaults in `config.py` were chosen with an earlier version that scored on the test period
+  itself, so the TFT's reported scores may be slightly optimistic.)
 * **Metrics:** pinball loss (p10/p50/p90, in SGD), MAPE / MAE / RMSE of the median, 80% interval
   coverage, directional accuracy (only for forecasts calling a >0.5% move), plus Diebold–Mariano tests
   on per-origin percentage pinball loss with Newey–West variance.
@@ -106,7 +116,7 @@ Differences from the original paper, and why:
 | `GET /api/history/{cat}?years=` | bidding results |
 | `GET /api/forecast/{cat}?scenario=` | p5–p95 for the next 6 exercises |
 | `GET /api/scenarios` | supply what-if scenarios |
-| `GET /api/recommendation/{cat}` | buy/wait advice with confidence and reasons |
+| `GET /api/recommendation/{cat}?quota_pct=` | market outlook with its evidence (chance lower / higher, chance of an 8% drop, uncertainty, drivers); never a buy / wait call |
 | `GET /api/bid-planner/{cat}?bid=` | win probability curve and suggested bids |
 | `GET /api/policy/events` | events with Box-Tiao effects and CIs |
 | `GET /api/model/metrics` | leaderboard, by horizon, by category |
@@ -116,7 +126,7 @@ Differences from the original paper, and why:
 | `GET/POST/DELETE /api/alerts` | anonymous watchlist targets (409 on duplicates) |
 | `GET /api/macro` | CPI inflation, SORA, GDP |
 | `GET /api/glossary` | plain-language + technical definitions ("Explain this", the analyst) |
-| `GET /api/analyst/status` | analyst mode: `llm` (Claude configured) or `offline` (basic mode) |
+| `GET /api/analyst/status` | analyst mode: `llm` (Groq or Claude configured) or `offline` (basic mode) |
 | `POST /api/analyst/chat` | COE Analyst: conversation + current view → reply, validated app actions, provenance (`?stream=1`: Server-Sent Events) |
 
 Interactive documentation (OpenAPI/Swagger) is served at `/api/docs`.

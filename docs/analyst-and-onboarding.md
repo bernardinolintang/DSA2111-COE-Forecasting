@@ -77,4 +77,4 @@ End-to-end coverage maps to the acceptance criteria: every forecast category loa
 - **The Groq and Claude paths are unit-tested with scripted fake clients, not against the live APIs** in this environment (no key was available). Ask a few real questions after setting the key.
 - On Groq's free tier (8K tokens a minute) one question fits, but asking several within a minute (or running the e2e suite, whose real-backend tests call the analyst) can hit the rate limit; the panel then shows a basic-mode answer with a notice. For deterministic, quota-free e2e runs, start the API with `ANALYST_ENABLED=false`. The backend integration tests already force basic mode.
 - The rate limit is in memory per API worker; replicas do not share it.
-- The conviction thresholds (65% / 55%) are a presentation choice, not part of the evaluated model; the Wait rule itself is unchanged.
+- The conviction thresholds (65% / 55%) are a presentation choice, not part of the evaluated model. (In COE Compass the same 65% / 55% cut-offs set the market outlook, and the 8% threshold only measures the chance of a meaningful drop.)

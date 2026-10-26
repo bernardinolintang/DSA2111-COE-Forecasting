@@ -8,6 +8,10 @@ lists input features to switch off (feature ablation) and ``_cv: false`` skips
 the epoch cross-validation (uses ``default_epochs``). Every configuration is
 backtested on the same rolling origins against the random walk, and a pooled
 leaderboard is printed at the end.
+
+Tuning is scored on the three years *before* the held-out test period (the
+test exercises are dropped first), so choosing hyper-parameters never looks at
+the exercises behind the reported results.
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ from coe_ml.pipeline import configure_logging               # noqa: E402
 def main(overrides: list[dict], seeds: int = 3) -> None:
     configure_logging()
     panel = build_panel(ingest.load_coe_results(offline=True), ingest.load_macro(offline=True))
+    held_out = PipelineConfig().backtest.test_exercises
+    panel = panel[panel["time_idx"] <= panel["time_idx"].max() - held_out]     # validation = the 3 years before the test period
     results = []
     for i, override in enumerate(overrides or [{}]):
         cfg = PipelineConfig()

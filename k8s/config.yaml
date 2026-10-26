@@ -6,6 +6,6 @@ kind: ConfigMap
 metadata:
   name: coe-config
 data:
-  WAIT_THRESHOLD: "0.08"      # "wait" when the median is >= 8% below today's premium
+  WAIT_THRESHOLD: "0.08"      # a drop of >= 8% counts as meaningful (market outlook evidence)
   COE_WORKERS: "2"            # worker processes for the ML pipeline (shared VM: keep small)
   ANALYST_MODEL: ""           # COE Analyst model; empty = provider default (Groq: openai/gpt-oss-120b)

@@ -1,5 +1,9 @@
 // Builds the project report (IEEE conference layout, A4, two columns) as an editable Word file.
 //
+// NOTE: this generated the first draft (1 Oct 2026, run 39). The report has since been edited by
+// hand (team sections, the market outlook instead of Buy / Wait, new tables), so re-running it
+// overwrites those edits. Edit the .docx itself instead.
+//
 //   npm install docx            (once, anywhere on NODE_PATH)
 //   node report/src/build_report.cjs [output.docx]
 //
