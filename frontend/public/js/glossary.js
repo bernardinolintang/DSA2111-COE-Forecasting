@@ -101,7 +101,9 @@ export function installExplain() {
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(true); });
   window.addEventListener("resize", () => close());
-  document.addEventListener("coe:routed", () => close());
+  // Close popovers left over from the previous page, but not one opened on the
+  // new page while it was still loading (its button is still on screen).
+  document.addEventListener("coe:routed", (e) => { if (e.detail?.inPlace || !trigger?.isConnected) close(); });
 }
 
 // ---------------------------------------------------------------------------

@@ -41,9 +41,15 @@ server {
         proxy_read_timeout 30s;
     }
 
-    # Static assets can be cached; index.html is always revalidated.
+    # Scripts and styles are revalidated on every load (a cheap 304 when unchanged):
+    # the ES modules are not versioned, so caching them for longer can mix old and
+    # new modules after a redeploy and break the app. Images and fonts can be cached.
     # (``expires`` is used instead of add_header so the security headers above are inherited.)
-    location ~* \.(css|js|svg|png|ico|woff2)$ {
+    location ~* \.(css|js)$ {
+        expires -1;
+    }
+
+    location ~* \.(svg|png|ico|woff2)$ {
         expires 1h;
     }
 
