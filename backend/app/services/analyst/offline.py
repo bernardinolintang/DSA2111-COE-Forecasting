@@ -44,7 +44,7 @@ NAV_VERB = re.compile(r"\b(show|open|take me|go to|go back|navigate|switch|bring
 GLOSSARY_KEYS = [
     ("range-80", r"80\s*%|80 percent|p10|p90"),
     ("range-50", r"50\s*%\s*range|50 percent range|p25|p75"),
-    ("significance", r"\bn\.?s\.?\b|not significant|significan|p\s*<\s*0?\.05|p-?value"),
+    ("significance", r"\bn\.?s\.?\b|not significant|significan|p\s*<\s*0?\.05|p-?value|\bunclear\b"),
     ("confidence-interval", r"confidence interval|\bci\b|whisker"),
     ("box-tiao", r"box[- ]?tiao|intervention analysis"),
     ("smape", r"\bsmape\b"),
@@ -394,7 +394,7 @@ def _biggest_policy(ctx: AnalystContext, cat: str):
         return f"There are no estimated policy effects for Cat {cat} yet.", []
     ev, e = best
     sig = ("statistically significant (p<0.05)" if e["significant"]
-           else "not statistically significant, so treat it as a rough indication")
+           else "unclear (not statistically significant), so treat it as a rough indication")
     ci = f" (95% interval {e['ci95_pct'][0]:+.1f}% to {e['ci95_pct'][1]:+.1f}%)" if e.get("ci95_pct") else ""
     word = "higher" if e["effect_pct"] > 0 else "lower"
     return (f"The largest estimated effect on Cat {cat} is the {ev['name']} ({ev['effective']}): premiums about "

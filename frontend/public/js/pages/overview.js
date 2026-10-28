@@ -220,7 +220,7 @@ export async function render(root) {
     const ours = metrics.leaderboard.find((r) => r.model === "hybrid") || metrics.leaderboard[0];
     const years = metrics.test_period.exercises ? metrics.test_period.exercises / 24 : null;
     mount(root.querySelector("#stats"), html`
-      <div class="stat"><div class="stat-value">${pct(ours.mape, { sign: false })}</div><div class="stat-label">average error of the median forecast over ${years ? `${years} held-out years` : "the held-out period"}</div></div>
+      <div class="stat"><div class="stat-value">${pct(ours.mape, { sign: false })}</div><div class="stat-label">average error over ${years ? `${years} years of results the model never saw` : "results the model never saw"}</div></div>
       <div class="stat"><div class="stat-value">${pct(ours.coverage80, { sign: false, digits: 0 })}</div><div class="stat-label">of real outcomes fell inside the 80% range</div></div>
       <div class="stat"><div class="stat-value">${ours.direction == null ? "—" : pct(ours.direction, { sign: false, digits: 0 })}</div><div class="stat-label">of up / down calls were right</div></div>
       <div class="stat"><div class="stat-value">${events.length}</div><div class="stat-label">past policy changes measured for their effect on premiums</div></div>`);

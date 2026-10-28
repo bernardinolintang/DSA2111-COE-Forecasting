@@ -110,7 +110,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
 
       <div class="card card-lg mt-24" data-anchor="forecast-table">
         <div class="card-head"><div><h2 class="title">Next six bidding exercises</h2>
-          <p class="card-sub" id="steps-sub">The forecast range for each upcoming exercise, with supply as announced.</p></div></div>
+          <p class="card-sub" id="steps-sub">The forecast for each upcoming exercise, with supply as announced. The premium should land between Low and High about 8 times in 10.</p></div></div>
         <div id="steps"><div class="skeleton" style="height:280px"></div></div>
       </div>
 
@@ -330,8 +330,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     zoomReset = false;
     mount($("#fan-table"), raw(dataTable(
       [{ label: "Exercise", get: (r) => r.label }, { label: "Recorded", num: true, get: (r) => (r.type === "actual" ? money(r.y) : "") },
-       { label: "p10", num: true, get: (r) => (r.q10 ? money(r.q10) : "") }, { label: "Median", num: true, get: (r) => (r.q50 ? money(r.q50) : "") },
-       { label: "p90", num: true, get: (r) => (r.q90 ? money(r.q90) : "") }],
+       { label: "Low", num: true, get: (r) => (r.q10 ? money(r.q10) : "") }, { label: "Most likely", num: true, get: (r) => (r.q50 ? money(r.q50) : "") },
+       { label: "High", num: true, get: (r) => (r.q90 ? money(r.q90) : "") }],
       rows,
     )));
     mount($("#fc-provenance"), provenance({ run: forecast.run, dataThrough: forecast.origin.label,
@@ -414,7 +414,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     swap(reasons, () => { mount(reasons, html`${a.reasons.map((r) => html`<li>${r}</li>`)}`); },
       { key: a.reasons.join("|"), animate, distance: 3 });
     el.querySelector(".advice-rule").textContent =
-      `Lowest median over the next six exercises: ${money(a.cheapest_q50)} (${a.cheapest_label}). `
+      `Lowest most-likely premium over the next six exercises: ${money(a.cheapest_q50)} (${a.cheapest_label}). `
       + "This describes the forecast and is not advice to buy or to wait: the model forecasts the COE premium only, one part of the cost of a car.";
   }
 
@@ -423,8 +423,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     const origin = forecast.origin.premium;
     mount($("#steps"), raw(dataTable(
       [{ label: "Exercise", get: (s) => s.label }, { label: "Quota", num: true, get: (s) => number(s.quota) },
-       { label: "p10", num: true, get: (s) => money(s.q10) }, { label: "Median", num: true, get: (s) => money(s.q50) },
-       { label: "p90", num: true, get: (s) => money(s.q90) }, { label: "vs today", num: true, get: (s) => pct((s.q50 / origin - 1) * 100) }],
+       { label: "Low", num: true, get: (s) => money(s.q10) }, { label: "Most likely", num: true, get: (s) => money(s.q50) },
+       { label: "High", num: true, get: (s) => money(s.q90) }, { label: "vs today", num: true, get: (s) => pct((s.q50 / origin - 1) * 100) }],
       forecast.steps,
     )));
   }

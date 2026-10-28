@@ -104,7 +104,11 @@ def advise(category_name: str, current: float, steps: list[dict], history: list[
     width = (end["q90"] - end["q10"]) / current * 50
 
     level = outlook_for(prob_lower)
-    median = f"the median forecast is {change * 100:+.1f}% by {horizon_label}"
+    if abs(change) < 0.005:
+        median = f"the most likely premium by {horizon_label} is about the same as today"
+    else:
+        median = (f"the most likely premium by {horizon_label} is {abs(change) * 100:.1f}% "
+                  f"{'lower' if change < 0 else 'higher'} than today")
     if level == "easing":
         lead = (f"{category_name} premiums are more likely to fall than rise: {median}, with a "
                 f"{prob_lower * 100:.0f}% chance of a lower premium.")
