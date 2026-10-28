@@ -3,7 +3,7 @@ ARIMA vs ARIMAX + Box-Tiao (policy dummies added).
 
 Run from the project folder:
   docker compose run --rm -v "$PWD":/workspace -w /workspace --entrypoint python ml \
-      ml/scripts/arima_ablation.py --out report/data/arima_run1
+      ml/scripts/arima_ablation.py --out report/data/policy_ablation/arima_run1
 
 Saves predictions.csv, metrics.csv, comparison_by_category_horizon.csv, run_info.json.
 change_pct = (with - without) / without * 100.  NEGATIVE = policy helped.

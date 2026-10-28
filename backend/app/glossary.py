@@ -115,9 +115,9 @@ def glossary() -> dict[str, dict]:
          "only while the policy was in force. A one-off shock affected a single moment.",
          "Modelled as a step dummy (1 from the effective date onwards), a temporary step (1 between start and "
          "end dates) or a pulse (1 at a single exercise)."),
-        ("significance", "n.s. / p<0.05 (statistical significance)",
-         "p<0.05 means the estimated effect is unlikely to be just noise. 'n.s.' means not statistically "
-         "significant: the estimate could plausibly be zero, so treat it as a rough indication only.",
+        ("significance", "Clear / unclear effect (statistical significance)",
+         "A clear effect is too large to be normal price swings. An unclear one (not statistically significant, "
+         "'n.s.') is within normal swings, so it could plausibly be zero: treat it as a rough indication only.",
          "p is the two-sided p-value of ω_k in the intervention model; significant when p < 0.05."),
         ("confidence-interval", "95% confidence interval",
          "The whiskers on each effect bar: the range of effect sizes that fit the data. If it crosses zero, the "

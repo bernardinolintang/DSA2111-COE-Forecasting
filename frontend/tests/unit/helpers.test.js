@@ -67,9 +67,9 @@ test("supply what-ifs route to the Scenario Lab; Learn sections live in the path
 
 test("policy effects read as plain English, including non-significance", () => {
   assert.equal(plainEffect({ category: "A", pct_effect: -10.8, significant: false }, "step"),
-    "The model estimates Cat A premiums were about 10.8% lower after this change, but the effect is not statistically significant — it could plausibly be zero.");
+    "The model estimates Cat A premiums were about 10.8% lower after this change, but that is within normal price swings, so it may not be a real effect.");
   assert.match(plainEffect({ category: "D", pct_effect: 32.9, significant: true }, "temporary"),
-    /32\.9% higher while it was in force, and the effect is statistically significant/);
+    /32\.9% higher while it was in force\. This is a clear effect/);
   assert.match(plainEffect({ category: "E", pct_effect: -0.1, significant: false }, "step"), /essentially no change/);
 });
 

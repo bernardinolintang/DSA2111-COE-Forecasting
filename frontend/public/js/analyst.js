@@ -40,7 +40,7 @@ const SUGGESTIONS = {
   scenario: ["Why did the forecast change?", "What if supply rises 15%?", "Does an increase in quota usually reduce premiums?"],
   bid: ["How much should I bid for a 90% chance?", "Why does a higher bid not cost more?", "What does chance of winning mean?"],
   plan: ["Explain my plan simply", "What does PQP mean?", "Alert me when Cat {cat} falls below $120k"],
-  policy: ["What changed Cat {cat} prices the most?", "What does n.s. mean?", "Does an increase in quota usually reduce premiums?"],
+  policy: ["What changed Cat {cat} prices the most?", "What does unclear mean?", "Does an increase in quota usually reduce premiums?"],
   model: ["Why should I trust this model?", "Why is the model less certain further ahead?", "What is sMAPE?"],
   alerts: ["Alert me when Cat A falls below $120k", "How does the watchlist tell me about changes?"],
   learn: ["Explain COE like I'm buying my first car", "What does the 80% range mean?", "Compare Cat A and Cat B"],

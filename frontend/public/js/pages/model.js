@@ -34,20 +34,20 @@ function trustSummary(board, byH, dm) {
   const rank = board.indexOf(ours) + 1;
   const dmNaive = dm.naive?.p_value;
   const vsNaive = naive
-    ? html`It beats the simplest method — assume the next premium equals today's
-        ${explain("random-walk", "random walk")} — by ${money(naive.pinball - ours.pinball)} of pinball loss
-        (${money(ours.pinball)} vs ${money(naive.pinball)})${dmNaive != null ? html`, a gap that ${dmNaive < 0.05 ? "is" : html`is <strong>not</strong>`} statistically significant (Diebold–Mariano p = ${dmNaive.toFixed(3)})` : ""}.
-        COE premiums are very hard to predict, so treat the ranges as the main message, not the single median.`
+    ? html`${ours.pinball < naive.pinball ? "It does a little better than" : "It does not beat"} the simplest guess, that the next premium will equal today's
+        ${explain("random-walk", "random walk")}${dmNaive != null ? (dmNaive < 0.05 ? ", and the gap is big enough to be a real difference" : html`, but the gap is <strong>small enough to be luck</strong>`) : ""}.
+        COE premiums are very hard to predict, so the likely range matters more than the single most likely price.
+        <span class="muted">(Pinball loss ${money(ours.pinball)} vs ${money(naive.pinball)}${dmNaive != null ? `; Diebold–Mariano p = ${dmNaive.toFixed(3)}` : ""}.)</span>`
     : "";
   return html`
     <div class="trust-grid mt-24">
       <div class="trust-item"><div class="trust-label">Model we use</div>
-        <div class="trust-value">Hybrid: TFT + Box-Tiao ARIMAX ${explain("hybrid", "hybrid model")}</div>
-        <div class="caption">${rank === 1 ? "Lowest error of" : `Ranked #${rank} of`} ${board.length} methods tested</div></div>
+        <div class="trust-value">An AI model and a statistics model, averaged ${explain("hybrid", "hybrid model")}</div>
+        <div class="caption">${rank === 1 ? "Lowest error of" : `Ranked #${rank} of`} ${board.length} methods tested · Hybrid: TFT + Box-Tiao ARIMAX</div></div>
       <div class="trust-item"><div class="trust-label">Typical error ${explain("mape", "MAPE")}</div>
         <div class="trust-value">${pct(ours.mape, { sign: false })}</div>
         <div class="caption">${h1 && h6 ? `From ${pct(h1.mape, { sign: false })} one exercise ahead to ${pct(h6.mape, { sign: false })} six ahead` : "Median forecast vs actual, held-out data"}</div></div>
-      <div class="trust-item"><div class="trust-label">80% range coverage ${explain("coverage", "interval coverage")}</div>
+      <div class="trust-item"><div class="trust-label">How often the range held ${explain("coverage", "interval coverage")}</div>
         <div class="trust-value">${pct(ours.coverage80, { sign: false })}</div>
         <div class="caption">of real results fell inside the 80% range (ideal: about 80%)</div></div>
       <div class="trust-item"><div class="trust-label">Compared against ${explain("backtest", "out-of-sample backtest")}</div>

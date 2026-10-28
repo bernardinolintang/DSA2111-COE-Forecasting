@@ -11,7 +11,7 @@ import { explain } from "./glossary.js";
 export function fanLegend({ baseline = false } = {}) {
   return html`<ul class="legend">
     <li><span class="key-line" style="background:var(--ink)"></span>Recorded premium</li>
-    <li><span class="key-line key-dash" style="color:var(--accent)"></span>Median forecast ${explain("median", "median forecast")}</li>
+    <li><span class="key-line key-dash" style="color:var(--accent)"></span>Most likely ${explain("median", "median forecast")}</li>
     <li><span class="key-band" style="background:var(--accent-wash-2)"></span>50% range ${explain("range-50", "50% range")}</li>
     <li><span class="key-band" style="background:var(--accent-wash)"></span>80% range ${explain("range-80", "80% range")}</li>
     ${baseline ? html`<li><span class="key-line key-dash" style="color:var(--ink-3)"></span>Median as announced</li>` : ""}
@@ -39,7 +39,7 @@ export function fanOptions({ history, steps, name, height, baseline = null, mark
     series: [
       { key: "actual", label: "Recorded", color: "var(--ink)", width: 2.25, points: hist },
       ...(base ? [{ key: "baseline", label: "As announced", color: "var(--ink-3)", dash: "2 5", points: [{ x: last.x, y: last.y }, ...base] }] : []),
-      { key: "median", label: "Median", color: "var(--accent)", width: 2.25, dash: "7 5",
+      { key: "median", label: "Most likely", color: "var(--accent)", width: 2.25, dash: "7 5",
         points: [{ x: last.x, y: last.y }, ...fc.map((s) => ({ x: s.x, y: s.q50 }))], endDot: true },
     ],
     bands: [

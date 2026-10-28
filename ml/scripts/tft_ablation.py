@@ -3,7 +3,7 @@ TFT ablation: TFT with policy inputs vs the same TFT without.
 
 Run from the project folder:
   docker compose run --rm -v "$PWD":/workspace -w /workspace --entrypoint python ml \
-      ml/scripts/tft_ablation.py --out report/data/tft_run1
+      ml/scripts/tft_ablation.py --epochs 3 --out report/data/policy_ablation/tft_fixed3
 
 Options:
   --epochs N   give BOTH models exactly N training epochs (skips the per-model
@@ -40,7 +40,7 @@ def main():
     ap.add_argument("--live", action="store_true", help="download fresh data (default: committed snapshot)")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--workers", type=int, default=None)
-    ap.add_argument("--out", default="report/data/fresh_policy_ablation")
+    ap.add_argument("--out", default="report/data/policy_ablation/fresh")
     ap.add_argument("--epochs", type=int, default=None,
                     help="force the same epoch count for both models (skips CV epoch selection)")
     a = ap.parse_args()

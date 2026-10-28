@@ -20,7 +20,7 @@ import { POLICY_SHORT as SHORT } from "./forecast.js";      // short names for t
 const KIND = { step: "Permanent shift", pulse: "One-off shock", temporary: "Temporary shift" };
 const LIMIT = 60;   // effect bars are drawn on a ±60% scale
 
-/** One sentence a car buyer can read, e.g. "... about 10.8% lower, but not statistically significant". */
+/** One sentence a car buyer can read, e.g. "... about 10.8% lower, but that is within normal price swings". */
 export function plainEffect(e, kind) {
   const size = Math.abs(e.pct_effect);
   const dir = e.pct_effect < 0 ? "lower" : "higher";
@@ -28,8 +28,8 @@ export function plainEffect(e, kind) {
   if (size < 0.5) return `The model finds essentially no change in Cat ${e.category} premiums ${when}.`;
   const base = `The model estimates Cat ${e.category} premiums were about ${size.toFixed(1)}% ${dir} ${when}`;
   return e.significant
-    ? `${base}, and the effect is statistically significant (unlikely to be noise).`
-    : `${base}, but the effect is not statistically significant — it could plausibly be zero.`;
+    ? `${base}. This is a clear effect: too large to be normal price swings.`
+    : `${base}, but that is within normal price swings, so it may not be a real effect.`;
 }
 
 /** The period shaded on the chart for an event, and how to describe it. */
@@ -59,7 +59,7 @@ function effectRow(e, selected) {
       <span class="cat-chip"><span class="cat-swatch" style="background:${catColor(e.category)}"></span>Cat ${e.category}</span>
       <span class="effect-track" aria-hidden="true"><span class="effect-zero"></span>${ci}
         <span class="effect-bar" style="left:${left}%;width:${width}%;background:${value < 0 ? "var(--down)" : "var(--up)"}"></span></span>
-      <span class="effect-val"><strong>${pct(value)}</strong> <span class="muted">${e.significant ? "p<0.05" : "n.s."}</span></span>
+      <span class="effect-val"><strong>${pct(value)}</strong> <span class="muted">${e.significant ? "clear" : "unclear"}</span></span>
     </div>`;
 }
 
@@ -84,8 +84,8 @@ function eventCard(ev, category, selected) {
             aria-pressed="${selected}">${selected ? "Shown on chart" : "Show on chart"}</button></p>` : ""}
         ${ev.effects.length
           ? html`<div class="mt-16">${ev.effects.map((e) => effectRow(e, e.category === category))}</div>
-                 <p class="caption mt-8">Bars show the estimated level shift in the premium; whiskers are 95% confidence intervals
-                   ${explain("confidence-interval", "confidence interval")}. n.s. = not statistically significant ${explain("significance", "n.s. and p<0.05")}</p>
+                 <p class="caption mt-8">Bars show the estimated change in the premium; thin lines show the range it plausibly falls in
+                   ${explain("confidence-interval", "confidence interval")}. "Unclear" means it can't be told apart from no change ${explain("significance", "clear and unclear")}</p>
                  <details class="tech-details mt-8"><summary>Technical details</summary>
                    ${raw(dataTable([
                      { label: "Category", get: (e) => `Cat ${e.category}` },
@@ -125,7 +125,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
       <div class="timeline mt-40" id="events" data-anchor="policy-events"></div>
       <div class="card mt-40">
         <h2 class="title">How to read this</h2>
-        <p class="muted small mt-8">Each bar is the estimated change in premiums after a policy, after allowing for the market's normal movement. Short whiskers that don't cross zero mean a clear effect; long whiskers crossing zero mean the data can't tell the effect apart from no effect.</p>
+        <p class="muted small mt-8">Each bar is the estimated change in premiums after a policy, after allowing for the market's normal movement. Short thin lines that don't cross zero mean a clear effect; long lines crossing zero mean the data can't tell the effect apart from no effect.</p>
         <details class="tech-details mt-16"><summary>Methodology</summary>
           <p class="muted small mt-8">For each category we fit <em>y<sub>t</sub> = Σ ω<sub>k</sub>·I<sub>k</sub>(t) + N<sub>t</sub></em> on the Box-Cox-transformed premium, where I<sub>k</sub> switches on when policy k takes effect and N<sub>t</sub> is an ARIMA(p,1,q) process chosen by AIC. ω<sub>k</sub> is the policy's level shift after accounting for normal dynamics; we convert it into a percentage of the premium just before the event. Effects of events that overlap in time (e.g. 2013 and 2014) are hard to separate, so read wide intervals with care.</p>
         </details>
@@ -252,7 +252,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     setView({ category, facts: [
       { label: "Category", value: `Cat ${category}` },
       { label: "Policy events that apply", value: String(relevant().length) },
-      ...(biggest ? [{ label: "Largest estimated effect", value: `${biggest.ev.name}: ${pct(biggest.e.pct_effect)}${biggest.e.significant ? "" : " (n.s.)"}` }] : []),
+      ...(biggest ? [{ label: "Largest estimated effect", value: `${biggest.ev.name}: ${pct(biggest.e.pct_effect)}${biggest.e.significant ? "" : " (unclear)"}` }] : []),
     ] });
   }
 

@@ -59,6 +59,7 @@ export const rangeShort = (lo, hi) => (bad(lo) || bad(hi) ? "—" : `${moneyShor
 export function pct(v, { sign = true, digits = 1 } = {}) {
   if (bad(v)) return "—";
   const s = digits === 1 ? nf1.format(Math.abs(v)) : nf0.format(Math.abs(v));
+  if (Number(s) === 0) return `${s}%`;   // no "−0.0%" for changes that round to nothing
   const prefix = !sign ? (v < 0 ? "−" : "") : v > 0 ? "+" : v < 0 ? "−" : "";
   return `${prefix}${s}%`;
 }
