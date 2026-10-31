@@ -16,6 +16,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from typing import Callable, Iterable, TypeVar
 
+# these type variables say the output follows fn so that the signature stays readable
 T = TypeVar("T")
 R = TypeVar("R")
 
@@ -23,8 +24,11 @@ R = TypeVar("R")
 def parallel_map(fn: Callable[[T], R], items: Iterable[T], n_workers: int) -> list[R]:
     """``[fn(x) for x in items]``, in up to ``n_workers`` processes."""
     items = list(items)
+    # this stays in the same process when there is nothing to split so that small jobs skip the
+    # worker start-up cost
     if n_workers <= 1 or len(items) <= 1:
         return [fn(item) for item in items]
+    # this uses spawn workers so that PyTorch thread pools cannot deadlock a forked child
     context = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=min(n_workers, len(items)), mp_context=context) as pool:
         return list(pool.map(fn, items))

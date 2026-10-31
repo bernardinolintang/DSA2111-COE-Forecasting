@@ -14,6 +14,7 @@ const SPREAD = [0.8, 0.85, 0.92, 1, 1.08, 1.15, 1.2];
 const step = (median, extra = {}) => ({ ...Object.fromEntries(QS.map((q, i) => [q, median * SPREAD[i]])), ...extra });
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} is not close to ${b}`);
 
+// this checks the slider maths so that it never goes past the modelled range
 test("the slider interpolates between modelled runs and never extrapolates", () => {
   const runs = [
     { pct: 20, steps: [step(100_000, { quota: 1000 }), step(96_000, { quota: 1200 })] },
@@ -31,6 +32,7 @@ test("the slider interpolates between modelled runs and never extrapolates", () 
   assert.deepEqual(interpolateSteps([], 5), []);
 });
 
+// this checks the wording so that it matches the API
 test("scenario wording: labels and the comparison with the forecast as announced", () => {
   assert.deepEqual([scenarioLabel(0), scenarioLabel(15), scenarioLabel(-5)], ["As announced", "+15% supply", "−5% supply"]);
   assert.equal(scenarioDelta(100, 100, 0), null);
@@ -42,6 +44,7 @@ test("scenario wording: labels and the comparison with the forecast as announced
   assert.equal(scenarioDelta(100_010, 100_000, 5).dir, "flat");
 });
 
+// this checks the browser's CDF against the API's numbers so that both sides agree
 test("cdfAt matches the API's quantile maths", () => {
   const s = step(100_000);                                                 // quantiles 80k … 120k
   [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95].forEach((level, i) => near(cdfAt(s, s[QS[i]]), level));
@@ -52,6 +55,7 @@ test("cdfAt matches the API's quantile maths", () => {
   for (let x = 70_000; x <= 130_000; x += 2_500) { const p = cdfAt(s, x); assert.ok(p >= last); last = p; }
 });
 
+// this checks the bid helpers so that the chance, ladder and sentence are all right
 test("bid planner: chance of winning, nearby bids and the explanation", () => {
   const curve = [{ bid: 100_000, probability_pct: 0 }, { bid: 110_000, probability_pct: 50 }, { bid: 120_000, probability_pct: 100 }];
   assert.equal(winProbability(curve, 90_000), 0);
@@ -72,6 +76,7 @@ test("bid planner: chance of winning, nearby bids and the explanation", () => {
   assert.match(explainBid(plan, 133_217, money), /^Your bid is right at our median forecast/);
 });
 
+// this checks the PQP rule so that recorded results and forecasts mix correctly
 test("PQP: the average of the three months before, with forecasts for exercises not yet held", () => {
   const history = [];
   for (const [month, a, b] of [["2026-06-01", 100, 102], ["2026-07-01", 104, 106], ["2026-08-01", 108, 110], ["2026-09-01", 112, 114]]) {
@@ -95,6 +100,7 @@ test("PQP: the average of the three months before, with forecasts for exercises 
   assert.equal(pqpPath([...history, { month: "2026-10-01", bidding_no: 1, premium: 118 }], steps)[0].month, "2026-10");
 });
 
+// this checks the small display helpers so that ids, times and drivers read properly
 test("forecast details: IDs, Singapore time and drivers in words", () => {
   assert.equal(forecastId("A", { month: "2026-10-01", bidding_no: 1 }, { id: 39 }), "A-2026-10-E1-r39");
   assert.equal(forecastId("A", null, { id: 39 }), null);

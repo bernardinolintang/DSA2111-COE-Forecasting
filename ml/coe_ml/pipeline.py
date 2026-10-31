@@ -34,12 +34,14 @@ from .preparation import FittedState, fit_state, prepare
 from .training import Ensemble, TrainJob, make_windows, train_many
 
 log = logging.getLogger(__name__)
+# this names the quantile columns so that they match the forecasts table
 QUANTILE_COLUMNS = [f"q{int(q * 100):02d}" for q in QUANTILES]       # q05 ... q95
 
 
 # ---------------------------------------------------------------------------
 # Production model
 # ---------------------------------------------------------------------------
+# this keeps the fitted pieces together so that forecasting only needs one object
 @dataclass
 class ProductionModel:
     """Everything needed to forecast: transforms, the TFT ensemble and the Box-Tiao ARIMAX."""
@@ -55,10 +57,13 @@ def train_production(panel: pd.DataFrame, cfg: PipelineConfig, epochs: int, n_se
     state = fit_state(panel, cfg.n_workers)
     prepared = prepare(panel, state)
     windows = make_windows(prepared, cfg.tft.encoder_length, cfg.tft.horizon)
+    # this shares the CPU threads between workers so that processes do not fight for cores
     threads = max(1, (os.cpu_count() or 2) // max(1, cfg.n_workers))
+    # this trains one TFT per seed so that the ensemble is more stable than a single model
     jobs = [TrainJob("tft", windows, None, cfg.tft, seed=cfg.tft.seed + s, epochs=epochs, threads=threads)
             for s in range(n_seeds)]
     results = train_many(jobs, cfg.n_workers)
+    # this fits the Box-Tiao ARIMAX on all data so that it can join the TFT in the hybrid
     arimax = ArimaForecaster(with_interventions=True).fit(prepared, cfg.n_workers)
     log.info("Production TFT: %d windows, %d epochs, %d seeds (+ Box-Tiao ARIMAX)", len(windows), epochs, n_seeds)
     return ProductionModel(state, prepared, Ensemble("tft", cfg.tft, [r.state_dict for r in results]), arimax)
@@ -74,18 +79,25 @@ def forecast_scenarios(panel: pd.DataFrame, model: ProductionModel, cfg: Pipelin
     origin = int(panel["time_idx"].max())
     inverse = model.state.target_scaler.inverse
     rows = []
+    # this repeats the forecast for each supply scenario so that the app can show what-if results
     for scenario, multiplier in SCENARIOS.items():
+        # this adds future rows with that scenario's quota so that the TFT reacts to the assumed
+        # supply
         extended = extend_with_future(panel, H, multiplier)
         prepared = prepare(extended, model.state)
         windows = make_windows(prepared, L, H, {c: [origin] for c in CATEGORIES}, require_target=False)
         prediction = model.tft.predict(windows)["prediction"]                 # [5, H, Q] scaled
         future = extended[extended["is_future"]].set_index(["category", "time_idx"])
         for i, cat in enumerate(windows.category):
+            # this forecasts the same category with the ARIMAX so that we have the second half of
+            # the hybrid
             grp = prepared[prepared["category"] == cat].sort_values("time_idx")
             econ = model.arimax.predict_origin(cat, grp[grp["time_idx"] <= origin],
                                                grp[grp["time_idx"] > origin], QUANTILES)
+            # this converts both to SGD, averages them and sorts so that quantiles stay in order
             members = [inverse(cat, p.reshape(-1)).reshape(p.shape) for p in (prediction[i], econ)]
             sgd = np.sort(combine_quantiles(members), axis=-1)
+            # this writes one row per exercise ahead so that the output matches the forecasts table
             for h in range(H):
                 meta = future.loc[(cat, origin + h + 1)]
                 rows.append({"category": cat, "scenario": scenario, "step": h + 1,
@@ -100,10 +112,12 @@ def interpretability(prepared: pd.DataFrame, ensemble: Ensemble, cfg: PipelineCo
     """Average TFT variable-selection weights and attention over recent windows."""
     L, H = cfg.tft.encoder_length, cfg.tft.horizon
     last = int(prepared["time_idx"].max())
+    # this picks the last few dozen origins so that the importance reflects the recent market
     origins = {c: list(range(last - H - recent, last - H + 1)) for c in CATEGORIES}
     windows = make_windows(prepared, L, H, origins)
     out = ensemble.predict(windows, interpret=True)
 
+    # this averages over windows and seeds so that each variable gets one importance number
     enc = out["encoder_weights"].mean(axis=(0, 1))
     dec = out["decoder_weights"].mean(axis=(0, 1))
     importance = pd.DataFrame(
@@ -111,7 +125,8 @@ def interpretability(prepared: pd.DataFrame, ensemble: Ensemble, cfg: PipelineCo
         + [{"component": "decoder", "variable": v, "importance": float(w)} for v, w in zip(DECODER_FEATURES, dec)]
     )
 
-    # attention: [N, H, L+H]; keep the encoder part, average over decoder steps.
+    # attention is [N, H, L+H], this keeps the encoder part and averages over decoder steps so that
+    # we get one weight per past exercise
     attn_rows = []
     for cat in CATEGORIES:
         mask = windows.category == cat
@@ -121,6 +136,7 @@ def interpretability(prepared: pd.DataFrame, ensemble: Ensemble, cfg: PipelineCo
     return importance, pd.DataFrame(attn_rows)
 
 
+# this drops the internal omega column so that the table has what the Policy Lab shows
 def intervention_table(state: FittedState) -> pd.DataFrame:
     rows = [{k: v for k, v in effect.items() if k != "omega_target_units"}
             for result in state.interventions for effect in result.effects]
@@ -133,6 +149,8 @@ def headline_metrics(metrics: pd.DataFrame, reference: str = "hybrid") -> dict:
     summary = {m: {k: None if pd.isna(pooled.loc[m, k]) else round(float(pooled.loc[m, k]), 3)
                    for k in ["mape", "mae", "pinball", "coverage80", "direction"]}
                for m in pooled.index}
+    # this works out how much better our model is than each other model so that the site can quote
+    # it
     ours = pooled.loc[reference, "pinball"]
     improvement = {m: round(float((pooled.loc[m, "pinball"] - ours) / pooled.loc[m, "pinball"] * 100), 2)
                    for m in pooled.index if m != reference}
@@ -143,20 +161,25 @@ def headline_metrics(metrics: pd.DataFrame, reference: str = "hybrid") -> dict:
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+# this runs every stage in order and records the run so that a failed run is marked failed in the
+# database
 def run(cfg: PipelineConfig, *, offline: bool = False, skip_backtest: bool = False,
         n_seeds: int = 3, write_db: bool = True) -> dict:
     started = time.time()
     engine, run_id = None, None
+    # this saves the settings with the run so that any result can be traced back to them
     params = {"tft": asdict(cfg.tft), "backtest": asdict(cfg.backtest), "n_seeds": n_seeds,
               "encoder_features": ENCODER_FEATURES, "decoder_features": DECODER_FEATURES,
               "scenarios": SCENARIOS, "wait_threshold": cfg.wait_threshold}
 
+    # this loads the data and builds the panel so that every model starts from the same table
     coe, macro = ingest.load_coe_results(offline), ingest.load_macro(offline)
     panel = build_panel(coe, macro)
     last = panel.sort_values("time_idx").iloc[-1]
     log.info("Panel: %d rows, %d exercises, last = %s #%d", len(panel), panel["time_idx"].nunique(),
              last["month"].strftime("%Y-%m"), last["bidding_no"])
 
+    # this opens a run row first so that a crash later still leaves a record
     if write_db:
         engine = db.get_engine()
         db.wait_for_db(engine)
@@ -167,9 +190,11 @@ def run(cfg: PipelineConfig, *, offline: bool = False, skip_backtest: bool = Fal
     try:
         outputs: dict[str, pd.DataFrame] = {}
         metrics_summary: dict = {}
-        # A quick retrain (no backtest) reuses the epoch count that cross-validation
-        # chose in the latest full run, so both kinds of run train the same way.
+        # a quick retrain with no backtest reuses the epoch count that cross-validation chose in the
+        # latest full run, so that both kinds of run train the same way
         epochs = (db.last_evaluated_epochs(engine) if write_db else None) or cfg.tft.default_epochs
+        # this runs the backtest unless skipped so that the metrics are measured on data the model
+        # never saw
         if not skip_backtest:
             bt = backtest(panel, cfg, n_seeds)
             epochs = bt.best_epochs["tft"]
@@ -181,6 +206,7 @@ def run(cfg: PipelineConfig, *, offline: bool = False, skip_backtest: bool = Fal
             metrics_summary["test_start"] = _exercise_meta(panel, bt.test_start)
             _log_leaderboard(bt.metrics)
 
+        # this trains on all data then forecasts so that the live forecast uses every result we have
         model = train_production(panel, cfg, epochs, n_seeds)
         outputs["forecasts"] = forecast_scenarios(panel, model, cfg)
         outputs["intervention_effects"] = intervention_table(model.state)
@@ -188,6 +214,7 @@ def run(cfg: PipelineConfig, *, offline: bool = False, skip_backtest: bool = Fal
         metrics_summary["production_epochs"] = epochs
         _log_forecast(outputs["forecasts"], panel)
 
+        # this stores everything and clears old runs so that the app picks up the new forecast
         if write_db:
             db.save_outputs(engine, run_id, outputs)
             db.finish_run(engine, run_id, "succeeded", metrics=metrics_summary,
@@ -196,17 +223,21 @@ def run(cfg: PipelineConfig, *, offline: bool = False, skip_backtest: bool = Fal
             db.prune_runs(engine)
         log.info("Pipeline finished in %.0fs", time.time() - started)
         return {"run_id": run_id, "metrics": metrics_summary, "outputs": outputs}
+    # this marks the run failed before raising again so that the error is visible in the database
     except Exception as exc:
         if write_db and run_id is not None:
             db.finish_run(engine, run_id, "failed", notes=repr(exc), duration_s=time.time() - started)
         raise
 
 
+# this looks up the month and exercise for a time index so that metrics can say when the test period
+# starts
 def _exercise_meta(panel: pd.DataFrame, time_idx: int) -> dict:
     row = panel[panel["time_idx"] == time_idx].iloc[0]
     return {"month": row["month"].strftime("%Y-%m"), "bidding_no": int(row["bidding_no"])}
 
 
+# this prints the model ranking so that a run can be checked without opening the app
 def _log_leaderboard(metrics: pd.DataFrame) -> None:
     pooled = metrics[(metrics["category"] == "*") & (metrics["horizon"] == 0)].sort_values("pinball")
     log.info("Backtest leaderboard (all categories, all horizons):")
@@ -216,6 +247,7 @@ def _log_leaderboard(metrics: pd.DataFrame) -> None:
                  r["model"], r["pinball"], r["mape"], r["coverage80"], direction)
 
 
+# this prints each category's forecast so that the numbers can be sanity checked in the logs
 def _log_forecast(forecasts: pd.DataFrame, panel: pd.DataFrame) -> None:
     base = forecasts[forecasts["scenario"] == "base"]
     latest = panel.sort_values("time_idx").groupby("category").tail(1).set_index("category")["premium"]
@@ -226,6 +258,7 @@ def _log_forecast(forecasts: pd.DataFrame, panel: pd.DataFrame) -> None:
                  f"{end['q50']:,.0f}", change, f"{end['q10']:,.0f}", f"{end['q90']:,.0f}")
 
 
+# this sets one log format so that all modules print the same way
 def configure_logging() -> None:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")

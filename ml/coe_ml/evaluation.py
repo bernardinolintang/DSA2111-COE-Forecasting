@@ -38,6 +38,7 @@ from .training import Ensemble, TrainJob, Windows, make_windows, train_many
 
 log = logging.getLogger(__name__)
 
+# these are the display names of all models so that tables and the website use the same labels
 MODEL_LABELS = {
     "hybrid": "Hybrid: TFT + Box-Tiao ARIMAX (ours)",
     "tft": "TFT with policy inputs",
@@ -48,9 +49,12 @@ MODEL_LABELS = {
     "arima": "ARIMA",
     "naive": "Random walk",
 }
+# this finds p10, p50 and p90 in the full quantile list so that the TFT can be scored like the
+# baselines
 Q_IDX = [QUANTILES.index(0.1), QUANTILES.index(0.5), QUANTILES.index(0.9)]
 
 
+# this holds everything the backtest produces so that the pipeline can save it in one go
 @dataclass
 class BacktestResult:
     metrics: pd.DataFrame
@@ -61,10 +65,12 @@ class BacktestResult:
     dm_tests: dict[str, dict]
 
 
-# name -> (network kind, uses policy inputs)
+# this maps each network name to (network kind, uses policy inputs) so that the same code can train
+# all of them
 NEURAL_SPECS = {"tft": ("tft", True), "tft_no_policy": ("tft", False), "lstm": ("lstm", True)}
 
 
+# this shares the CPU threads between workers so that processes do not fight for cores
 def _threads(cfg: PipelineConfig) -> int:
     return max(1, (os.cpu_count() or 2) // max(1, cfg.n_workers))
 
@@ -74,12 +80,15 @@ def select_epochs(windows: dict[bool, Windows], test_start: int, cfg: PipelineCo
     """Choose each network's epoch count by rolling-origin cross-validation."""
     H, fold = cfg.tft.horizon, cfg.backtest.fold_exercises
     jobs = []
+    # this walks back one fold at a time so that every fold trains only on data before it
     for k in range(cfg.backtest.cv_folds):
         fold_end = test_start - k * fold
         fold_start = fold_end - fold
         for name in names:
             kind, policy = NEURAL_SPECS[name]
             w = windows[policy]
+            # this keeps the full horizon inside each split so that no training window touches the
+            # validation answers
             train = w.subset(w.origin + H < fold_start)
             val = w.subset((w.origin >= fold_start - 1) & (w.origin + H < fold_end))
             jobs += [(name, TrainJob(kind, train, val, cfg.tft, seed=cfg.tft.seed + s,
@@ -87,6 +96,8 @@ def select_epochs(windows: dict[bool, Windows], test_start: int, cfg: PipelineCo
                      for s in range(n_seeds)]
     results = train_many([job for _, job in jobs], cfg.n_workers)
 
+    # this averages the curves and takes the lowest point so that each network gets its best epoch
+    # count
     best, curves = {}, {}
     for name in names:
         curve = np.mean([r.val_curve for (n_, _), r in zip(jobs, results) if n_ == name], axis=0)
@@ -104,6 +115,7 @@ def backtest(panel: pd.DataFrame, cfg: PipelineConfig, n_seeds: int = 3,
     test_start = n - cfg.backtest.test_exercises
     log.info("Backtest: fit < %d <= test < %d", test_start, n)
 
+    # this fits every transform on the fit period only so that nothing from the test period leaks in
     fit_panel = panel[panel["time_idx"] < test_start]
     state = fit_state(fit_panel, cfg.n_workers)
     fit_prepared = {p: prepare(fit_panel, state, use_policy=p) for p in (True, False)}
@@ -112,10 +124,14 @@ def backtest(panel: pd.DataFrame, cfg: PipelineConfig, n_seeds: int = 3,
 
     # ---- neural networks ---------------------------------------------------
     neural = [name for name in NEURAL_SPECS if name in models]
+    # this picks epochs by cross-validation unless the fast config turned it off so that smoke tests
+    # stay quick
     if neural and cfg.backtest.select_epochs:
         best_epochs, cv_curves = select_epochs(windows, test_start, cfg, n_seeds, neural)
     else:
         best_epochs, cv_curves = {name: cfg.tft.default_epochs for name in neural}, {}
+    # this retrains each network on the whole fit period so that the final models use all the
+    # training data
     jobs = [(name, TrainJob(NEURAL_SPECS[name][0], windows[NEURAL_SPECS[name][1]], None, cfg.tft,
                             seed=cfg.tft.seed + s, epochs=best_epochs[name], threads=_threads(cfg)))
             for name in neural for s in range(n_seeds)]
@@ -134,14 +150,20 @@ def backtest(panel: pd.DataFrame, cfg: PipelineConfig, n_seeds: int = 3,
               for name in ("arima", "arimax_boxtiao") if name in models}
 
     # ---- roll through the test period -------------------------------------
+    # this starts one step before the test period and moves forward so that every test exercise gets
+    # forecast
     origins = list(range(test_start - 1, n - H, cfg.backtest.origin_stride))
     rows = []
     for t in origins:
+        # this passes only rows up to t and assumes the future quota so that a forecast can only use
+        # what was known at t
         extended = extend_with_future(panel[panel["time_idx"] <= t], H)
         prepared = {p: prepare(extended, state, use_policy=p) for p in (True, False)}
         at_origin = {c: [t] for c in CATEGORIES}
         w = {p: make_windows(prepared[p], L, H, at_origin, require_target=False) for p in (True, False)}
 
+        # this predicts with every model at this origin so that they are all scored on the same
+        # forecasts
         scaled = {name: ens.predict(w[NEURAL_SPECS[name][1]])["prediction"][..., Q_IDX]
                   for name, ens in ensembles.items()}
         scaled.update({name: model.predict(w[True]) for name, model in classical.items()})
@@ -154,12 +176,15 @@ def backtest(panel: pd.DataFrame, cfg: PipelineConfig, n_seeds: int = 3,
 
         rows.extend(_to_rows(scaled, w[True], panel, state, t, H))
 
+    # this adds the hybrid and runs the DM test so that our model is compared with the rest
     predictions = add_hybrid(pd.DataFrame(rows)) if "hybrid" in models else pd.DataFrame(rows)
     reference = "hybrid" if "hybrid" in set(predictions["model"]) else "tft"
     dm = diebold_mariano(predictions, model=reference, horizon_lag=H - 1) if reference in set(predictions["model"]) else {}
     return BacktestResult(compute_metrics(predictions), predictions, best_epochs, cv_curves, test_start, dm)
 
 
+# these are the two models the hybrid averages so that the mix is fixed before we see any test
+# result
 HYBRID_MEMBERS = ("tft", "arimax_boxtiao")
 
 
@@ -178,6 +203,8 @@ def add_hybrid(predictions: pd.DataFrame) -> pd.DataFrame:
              for m in HYBRID_MEMBERS]
     if any(p.empty for p in parts):
         return predictions
+    # this copies the TFT rows and swaps in the averaged quantiles so that the hybrid has the same
+    # columns as any model
     hybrid = parts[0].copy()
     for col in ("q10", "q50", "q90"):
         hybrid[col] = combine_quantiles([p[col].to_numpy() for p in parts])
@@ -193,6 +220,7 @@ def _to_rows(scaled: dict[str, np.ndarray], windows: Windows, panel: pd.DataFram
         grp = panel[panel["category"] == cat].set_index("time_idx")
         origin_premium = float(grp.loc[origin, "premium"])
         for name, pred in scaled.items():
+            # this converts each model's output back to SGD so that errors are in real dollars
             sgd = state.target_scaler.inverse(cat, pred[i].reshape(-1)).reshape(pred[i].shape)
             for h in range(H):
                 future = grp.loc[origin + h + 1]
@@ -208,6 +236,8 @@ def _to_rows(scaled: dict[str, np.ndarray], windows: Windows, panel: pd.DataFram
 # ---------------------------------------------------------------------------
 # Metrics
 # ---------------------------------------------------------------------------
+# this is the pinball loss for one quantile so that under and over predictions are punished
+# according to tau
 def _pinball(y, q, tau):
     return np.maximum(tau * (y - q), (tau - 1) * (y - q))
 
@@ -216,10 +246,11 @@ def summarise(df: pd.DataFrame) -> dict:
     y, p50 = df["actual"].to_numpy(), df["q50"].to_numpy()
     origin = df["origin_premium"].to_numpy()
     err = p50 - y
-    # Direction is only scored where the model actually calls a move (> 0.5%)
-    # and the premium actually moved; a flat forecast (random walk) has no score.
+    # direction is scored only where the model calls a move above 0.5% and the premium really moved
+    # so that a flat random walk gets no direction score
     moved, called = np.sign(y - origin), np.sign(p50 - origin)
     scored = (np.abs(p50 / origin - 1) > 0.005) & (moved != 0)
+    # this averages pinball over p10, p50 and p90 so that both the range and the median are scored
     pinball = np.mean([_pinball(y, df[c].to_numpy(), tau).mean()
                        for c, tau in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9))])
     return {
@@ -238,6 +269,8 @@ def compute_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
     """Metrics per (model, category, horizon) plus pooled rows (category '*', horizon 0)."""
     records = []
     for model, by_model in predictions.groupby("model"):
+        # this also adds "*" and horizon 0 rows so that we get pooled numbers for all categories and
+        # horizons
         for cat in [*CATEGORIES, "*"]:
             sub = by_model if cat == "*" else by_model[by_model["category"] == cat]
             for h in [0, *sorted(sub["horizon"].unique())]:
@@ -259,17 +292,23 @@ def diebold_mariano(predictions: pd.DataFrame, model: str = "hybrid", horizon_la
     """
     from scipy import stats
 
+    # this turns the loss into percent of the premium so that expensive categories do not dominate
     df = predictions.copy()
     df["loss"] = np.mean([_pinball(df["actual"], df[c], tau) for c, tau in
                           (("q10", 0.1), ("q50", 0.5), ("q90", 0.9))], axis=0) / df["actual"] * 100
+    # this averages per origin so that there is one loss number per forecast date
     per_origin = df.pivot_table(index="origin", columns="model", values="loss", aggfunc="mean")
     out = {}
     for other in per_origin.columns:
         if other == model:
             continue
+        # this takes the loss gap between the two models at each origin so that we can test if it
+        # differs from 0
         d = (per_origin[model] - per_origin[other]).dropna().to_numpy()
         n, mean = len(d), d.mean()
         centred = d - mean
+        # this adds Newey-West terms to the variance since nearby forecasts overlap so that the test
+        # does not overstate significance
         variance = centred @ centred / n
         for lag in range(1, min(horizon_lag, n - 1) + 1):
             weight = 1 - lag / (horizon_lag + 1)

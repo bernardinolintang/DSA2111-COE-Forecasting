@@ -12,6 +12,7 @@ const SECTIONS = [
   ["/#/learn/about", "About COE Compass.", "About", "Not a government service."],
 ];
 
+// this runs for each tab so that all of Learn opens with no errors
 for (const [url, title, tab, text] of SECTIONS) {
   test(`Learn: ${tab}`, async ({ page, problems }) => {
     await page.goto(url);
@@ -24,6 +25,7 @@ for (const [url, title, tab, text] of SECTIONS) {
   });
 }
 
+// this checks the guide so that it covers the basics and links to the tools
 test("the COE guide answers the basics and links to the tools", async ({ page }) => {
   await page.goto("/#/learn");
   const body = page.locator("#learn-body");
@@ -40,6 +42,7 @@ test("the COE guide answers the basics and links to the tools", async ({ page })
   await expect(page).toHaveURL(/#\/plan\?intent=renew$/);
 });
 
+// this checks the how section so that it shows live numbers and promises no guarantee
 test("how it works: five steps, live model facts and an honest answer about guarantees", async ({ page, request }) => {
   const [s, m] = await Promise.all(["/api/summary", "/api/model/metrics"].map(async (u) => (await request.get(u)).json()));
   const ours = m.leaderboard.find((r) => r.model === "hybrid");
@@ -58,6 +61,7 @@ test("how it works: five steps, live model facts and an honest answer about guar
   await expect(page.locator("#technical")).toHaveAttribute("open", "");
 });
 
+// this checks the sources section so that readers can see the publishers and freshness
 test("data sources name the publishers, the freshness and the audit trail", async ({ page, request }) => {
   const s = await (await request.get("/api/summary")).json();
   await page.goto("/#/learn/sources");
@@ -71,6 +75,7 @@ test("data sources name the publishers, the freshness and the audit trail", asyn
   await expect(body).toContainText("not affiliated with or endorsed by LTA");
 });
 
+// this checks the FAQ buttons so that they open the right helpers
 test("FAQ and help open the tour, the glossary and Ask Compass", async ({ page }) => {
   await page.goto("/#/learn/faq");
   const body = page.locator("#learn-body");
@@ -86,6 +91,7 @@ test("FAQ and help open the tour, the glossary and Ask Compass", async ({ page }
   await page.keyboard.press("Escape");
 });
 
+// this checks the footer and Help menu so that these pages are easy to find
 test("footer and Help menu lead to About, methodology, sources and FAQ", async ({ page }) => {
   await page.goto("/");
   const footer = page.locator("footer");

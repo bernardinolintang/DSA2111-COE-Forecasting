@@ -9,6 +9,7 @@ spec:
   replicas: 2
   selector:
     matchLabels: { app: coe-api }
+  # this rolls out one new pod at a time so that the API stays up during an update
   strategy:
     type: RollingUpdate
     rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }    # zero-downtime upgrades
@@ -27,7 +28,8 @@ spec:
                 secretKeyRef: { name: coe-db, key: password }
             - name: DATABASE_URL
               value: postgresql+psycopg://coe:$(POSTGRES_PASSWORD)@coe-db:5432/coe
-            # COE Analyst LLM keys (optional Secret created by deploy.sh); absent = basic mode.
+            # these are the COE Analyst LLM keys (optional Secret created by deploy.sh) so that
+            # absent keys just mean basic mode
             - name: GROQ_API_KEY
               valueFrom:
                 secretKeyRef: { name: coe-analyst, key: groq-api-key, optional: true }
@@ -36,14 +38,17 @@ spec:
                 secretKeyRef: { name: coe-analyst, key: anthropic-api-key, optional: true }
           envFrom:
             - configMapRef: { name: coe-config }
+          # this checks the API is ready so that traffic only goes to working pods
           readinessProbe:
             httpGet: { path: /api/health, port: 8000 }
             initialDelaySeconds: 5
             periodSeconds: 10
+          # this restarts a pod that stops answering so that it can heal itself
           livenessProbe:
             httpGet: { path: /api/health, port: 8000 }
             initialDelaySeconds: 20
             periodSeconds: 20
+          # these set CPU and memory limits so that one pod cannot use up the shared VM
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 500m, memory: 384Mi }

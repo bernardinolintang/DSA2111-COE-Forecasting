@@ -17,6 +17,7 @@ from .actions import ActionError, _amount, _category, quota_pct
 from .context import AnalystContext, load_steps, outlook_dict, recommendation_for, steps_for_quota
 
 
+# this gets the next exercise forecast so that bid tools share one lookup and one error
 def _next(conn: Connection, ctx: AnalystContext, cat: str) -> dict:
     steps = load_steps(conn, ctx, cat, "base")
     if not steps:
@@ -24,8 +25,10 @@ def _next(conn: Connection, ctx: AnalystContext, cat: str) -> dict:
     return steps[0]
 
 
+# this runs a tool by name, each one validates its inputs so that the model cannot pass in junk
 def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
     p = params or {}
+    # this tool answers "what is my chance with this bid" so that the model never guesses the odds
     if name == "bid_win_probability":
         cat, bid = _category(p.get("category")), _amount(p.get("bid"), "bid")
         nxt = _next(conn, ctx, cat)
@@ -33,6 +36,8 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                 "win_probability_pct": round(qt.cdf(qt.row_values(nxt), bid) * 100, 1),
                 "expected_premium_median": round(nxt["q50"])}
 
+    # this tool answers "what should i bid for this chance" so that the number comes from the
+    # forecast
     if name == "bid_for_probability":
         cat = _category(p.get("category"))
         try:
@@ -46,6 +51,7 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                 "probability_pct": prob, "bid": round(qt.quantile(qt.row_values(nxt), prob / 100)),
                 "expected_premium_median": round(nxt["q50"])}
 
+    # this tool gives a forecast at any supply change so that the model can answer what-ifs
     if name == "scenario_forecast":
         cat, pct = _category(p.get("category")), quota_pct(p)
         steps = steps_for_quota(conn, ctx, cat, pct)
@@ -57,6 +63,7 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                            "p10": round(s["q10"]), "median": round(s["q50"]), "p90": round(s["q90"])} for s in steps],
                 "outlook": outlook_dict(advice, summary=False)}
 
+    # this tool scores a target like the watchlist does so that both give the same odds
     if name == "target_outlook":
         cat = _category(p.get("category"))
         direction = p.get("direction")
@@ -69,6 +76,7 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                 "status": o["status"], "chance_within_quarter_pct": o["probability_pct"],
                 "most_likely_by": o["when"]}
 
+    # this tool sums up past premiums so that the model does not need the full history in its prompt
     if name == "history_summary":
         cat = _category(p.get("category"))
         years = int(p.get("years") or 0)
@@ -89,6 +97,7 @@ def run(conn: Connection, ctx: AnalystContext, name: str, params: dict) -> dict:
                 "first": rows[0]["premium"], "latest": rows[-1]["premium"],
                 "change_over_period_pct": round((rows[-1]["premium"] / rows[0]["premium"] - 1) * 100, 1)}
 
+    # this tool reads the app's own definition so that terms are explained the same way everywhere
     if name == "explain_term":
         term = glossary().get(str(p.get("term")))
         if not term:

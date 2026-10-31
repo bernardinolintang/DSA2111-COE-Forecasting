@@ -7,15 +7,18 @@ import { attachThumb } from "./motion.js";
 // ---------------------------------------------------------------------------
 // Safe HTML: every interpolated value is escaped unless wrapped in raw().
 // ---------------------------------------------------------------------------
+// this escapes special characters so that text from the API or the user cannot become HTML
 const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ESCAPES[c]);
 
+// this marks HTML we built ourselves so that it is not escaped twice
 class Raw {
   constructor(value) { this.value = value; }
   toString() { return this.value; }
 }
 export const raw = (value) => new Raw(value);
 
+// this turns one template value into text so that arrays and empty values just work
 function render(value) {
   if (value instanceof Raw) return value.value;
   if (Array.isArray(value)) return value.map(render).join("");
@@ -28,6 +31,7 @@ export function html(strings, ...values) {
   return raw(strings.reduce((out, s, i) => out + s + (i < values.length ? render(values[i]) : ""), ""));
 }
 
+// this writes HTML into an element so that all pages do it the same way
 export function mount(el, template) {
   el.innerHTML = String(template);
   return el;
@@ -36,9 +40,11 @@ export function mount(el, template) {
 // ---------------------------------------------------------------------------
 // Numbers
 // ---------------------------------------------------------------------------
+// these format numbers the Singapore way so that all pages look the same
 const nf0 = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
+// this catches missing numbers so that the page shows a dash and not NaN
 const bad = (v) => v == null || typeof v !== "number" || !Number.isFinite(v);
 export const money = (v) => (bad(v) ? "—" : `$${nf0.format(Math.round(v))}`);
 export const number = (v) => (bad(v) ? "—" : nf0.format(v));
@@ -56,6 +62,7 @@ export function moneyShort(v) {
 /** "$126k–$142k", or "—" when either end is missing. */
 export const rangeShort = (lo, hi) => (bad(lo) || bad(hi) ? "—" : `${moneyShort(lo)}–${moneyShort(hi)}`);
 
+// this formats a percent with a proper sign so that rounded zeros do not show as -0.0%
 export function pct(v, { sign = true, digits = 1 } = {}) {
   if (bad(v)) return "—";
   const s = digits === 1 ? nf1.format(Math.abs(v)) : nf0.format(Math.abs(v));
@@ -90,6 +97,7 @@ export function parseMoney(input, { min = 1, max = 999_999, what = "a COE premiu
 // Dates: an exercise is (month, bidding_no). For plotting we place the 1st
 // exercise on the 7th and the 2nd on the 21st of the month.
 // ---------------------------------------------------------------------------
+// this puts exercises on a date so that charts can use a time axis
 export function exerciseDate(month, biddingNo) {
   const [y, m] = String(month).split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, biddingNo === 1 ? 7 : 21));
@@ -97,6 +105,7 @@ export function exerciseDate(month, biddingNo) {
 
 export const monthYear = (d) => d.toLocaleDateString("en-SG", { month: "short", year: "numeric", timeZone: "UTC" });
 
+// this says how long ago something was so that timestamps are easy to read
 export function timeAgo(iso) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (s < 90) return "just now";
@@ -105,6 +114,7 @@ export function timeAgo(iso) {
   return `${Math.round(s / 86400)} days ago`;
 }
 
+// these are fixed month names so that they match the exercise labels in every browser language
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const sgtParts = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Singapore", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
@@ -122,7 +132,7 @@ export function sgt(iso, { year = true } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-viewer storage. Can throw (private mode, blocked storage), so always guarded.
+// per-viewer storage, it can throw (private mode, blocked storage) so that every access is guarded
 // ---------------------------------------------------------------------------
 export const store = {
   get(key, fallback = null) {
@@ -134,6 +144,7 @@ export const store = {
   },
 };
 
+// this gives each browser an anonymous id so that a watchlist works with no login
 export function clientId() {
   let id = store.get("coe-client-id");
   if (!id) {
@@ -145,6 +156,7 @@ export function clientId() {
   return id;
 }
 
+// this shows a short message so that the user sees that an action worked
 let toastTimer;
 export function toast(message) {
   const el = document.getElementById("toast");
@@ -154,10 +166,11 @@ export function toast(message) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2600);
 }
 
+// these are the category codes and colours so that charts agree on them
 export const CATEGORY_CODES = ["A", "B", "C", "D", "E"];
 export const catColor = (code) => `var(--cat-${code})`;
 
-// Inline icons (simple strokes).
+// this makes inline icons with simple strokes so that no icon library is needed
 const icon = (body, { size = 18, width = 2 } = {}) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 export const ICONS = {
@@ -183,6 +196,7 @@ export const ICONS = {
 // ---------------------------------------------------------------------------
 // Market outlook: which way the forecast leans, and how clearly. Never advice.
 // ---------------------------------------------------------------------------
+// these are the words for each trend so that sentences read naturally
 const TREND_WORD = { up: "up", down: "down", flat: "steady" };
 export const UNCERTAINTY = { low: "Low", moderate: "Moderate", high: "High" };
 
@@ -213,15 +227,14 @@ export function driverChips(drivers = []) {
     html`<li class="driver" title="${d.title}: ${d.text}"><span class="visually-hidden">${driverText(d)}. </span><span aria-hidden="true">${short(d)}</span></li>`)}</ul>`;
 }
 
-/**
- * Where a forecast came from: when it was produced, the last result it includes,
- * the model run and the source. Shown under every forecast.
- */
+// this builds the id shown in the forecast details so that a forecast can be traced to its run and
+// exercise
 export function forecastId(category, step, run) {
   if (!category || !step || !run) return null;
   return `${category}-${String(step.month).slice(0, 7)}-E${step.bidding_no}-r${run.id}`;
 }
 
+// this shows when and from what a forecast was made so that users can see where it came from
 export function provenance({ run, dataThrough, id = null } = {}) {
   if (!run) return html`<p class="provenance">Forecast details unavailable.</p>`;
   return html`<dl class="provenance" aria-label="Forecast details">
@@ -233,6 +246,7 @@ export function provenance({ run, dataThrough, id = null } = {}) {
   </dl>`;
 }
 
+// this builds a button group so that pages can offer choices the same way
 export function segmented(name, options, active, label) {
   return html`<div class="segmented" role="group" aria-label="${label}" data-seg="${name}">
     ${options.map((o) => html`<button type="button" data-value="${o.value}" aria-pressed="${o.value === active}">${o.label}</button>`)}
@@ -267,6 +281,7 @@ export function noticeBox({ title, body = "", tone = "info", retry = false }) {
   </div>`;
 }
 
+// this wraps an error in a notice so that errors look the same everywhere
 export function errorBox(err, title = "This couldn't be loaded") {
   return noticeBox({ title, body: err?.message || "Something went wrong.", tone: "error", retry: true });
 }

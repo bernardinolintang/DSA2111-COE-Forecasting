@@ -14,8 +14,10 @@ from ..labels import SCENARIOS
 from . import quantiles as qt
 from . import repository as repo
 
-# [(-20, "quota_minus_20"), ..., (0, "base"), ..., (20, "quota_plus_20")]
+# this builds [(-20, "quota_minus_20"), ..., (0, "base"), ..., (20, "quota_plus_20")] from the
+# labels so that the percent list never goes out of sync with them
 MODELLED = sorted((round((meta["multiplier"] - 1) * 100), key) for key, meta in SCENARIOS.items())
+# these are the limits and lookups so that percent and scenario id can be swapped either way
 MIN_PCT, MAX_PCT = MODELLED[0][0], MODELLED[-1][0]
 _BY_PCT = dict(MODELLED)
 PCT_OF = {key: pct for pct, key in MODELLED}
@@ -39,15 +41,20 @@ def steps_for(conn: Connection, run_id: int, category: str, pct: int,
 
     ``load(scenario)`` may be given to reuse rows the caller already holds.
     """
+    # this uses the loader passed in or the database so that callers holding rows can skip a query
     load = load or (lambda scenario: repo.forecast(conn, run_id, category, scenario))
+    # this keeps pct inside the modelled range so that nothing is extrapolated
     pct = max(MIN_PCT, min(MAX_PCT, int(pct)))
+    # this returns the stored forecast for a modelled point so that no maths is needed
     if pct in _BY_PCT:
         return load(_BY_PCT[pct])
+    # this finds the two modelled points around pct so that we can draw a line between them
     lo = max(p for p, _ in MODELLED if p < pct)
     hi = min(p for p, _ in MODELLED if p > pct)
     a, b = load(_BY_PCT[lo]), load(_BY_PCT[hi])
     if not a or not b:
         return []
+    # this is how far pct sits between them so that each quantile can be mixed by that share
     w = (pct - lo) / (hi - lo)
     mix = lambda x, y: x + (y - x) * w  # noqa: E731
     out = []

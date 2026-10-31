@@ -14,6 +14,7 @@ from __future__ import annotations
 from .config import settings
 
 
+# this builds the terms inside a function so that the 8% threshold comes from the settings
 def glossary() -> dict[str, dict]:
     t = round(settings.wait_threshold * 100)
     terms = [

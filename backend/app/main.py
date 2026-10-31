@@ -20,15 +20,18 @@ from .routers import alerts, analyst, forecast, market, model, policy
 from .schemas import Health
 from .services import repository as repo
 
+# this sets the log format once so that all modules print the same way
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+# this runs at start-up so that the schema is ready before the first request
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     wait_and_migrate()
     yield
 
 
+# this creates the API app so that the docs are served under /api/docs like the rest of the routes
 app = FastAPI(
     title="COE Compass API",
     description="Policy-aware probabilistic forecasts of Singapore COE premiums "
@@ -39,10 +42,13 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+# this compresses big responses and allows calls from other origins so that pages load faster and
+# local dev works
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["GET", "POST", "DELETE"],
                    allow_headers=["*"])
 
+# this groups every route under /api so that nginx can forward them in one rule
 api = APIRouter(prefix="/api")
 
 
@@ -55,6 +61,7 @@ def health(conn: Connection = Depends(get_connection)):
             "version": settings.version}
 
 
+# this adds every router so that each feature can live in its own file
 for router in (market.router, forecast.router, policy.router, model.router, alerts.router, analyst.router):
     api.include_router(router)
 app.include_router(api)

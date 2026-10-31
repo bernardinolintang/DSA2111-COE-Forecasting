@@ -6,6 +6,7 @@ import { expect, test } from "./fixtures.js";
 
 const money = (v) => `$${Math.round(v).toLocaleString("en-SG")}`;
 
+// this runs for each category so that all five load the full page
 for (const cat of ["A", "B", "C", "D", "E"]) {
   test(`forecast Cat ${cat} loads chart, outlook and table`, async ({ page, problems }) => {
     await page.goto(`/#/forecast/${cat}`);
@@ -22,6 +23,7 @@ for (const cat of ["A", "B", "C", "D", "E"]) {
   });
 }
 
+// this checks the outlook evidence and disclaimer so that it stays neutral
 test("the outlook shows its evidence and says it is not advice", async ({ page, request }) => {
   const rec = await (await request.get("/api/recommendation/A")).json();
   await page.goto("/#/forecast/A");
@@ -38,6 +40,7 @@ test("the outlook shows its evidence and says it is not advice", async ({ page, 
   await expect(page.locator("#fig-signal .pill")).toHaveText(rec.label);
 });
 
+// this checks the details line so that every forecast can be traced
 test("every forecast shows when it was made, from what, and by which model run", async ({ page, request }) => {
   const f = await (await request.get("/api/forecast/A")).json();
   await page.goto("/#/forecast/A");
@@ -52,6 +55,7 @@ test("every forecast shows when it was made, from what, and by which model run",
   await expect(page.locator("h1")).toHaveText("Where the data comes from.");
 });
 
+// this checks the key figures so that both dates show with their ranges
 test("key figures: next exercise and end of quarter, each with its likely range", async ({ page, request }) => {
   const f = await (await request.get("/api/forecast/B")).json();
   await page.goto("/#/forecast/B");
@@ -63,6 +67,7 @@ test("key figures: next exercise and end of quarter, each with its likely range"
   await expect(page.locator("#fig-next-range")).toHaveText(/^\$\d+k–\$\d+k$/);
 });
 
+// this delays an old reply on purpose so that we know it cannot overwrite a newer one
 test("a slow older category response never overwrites a newer one", async ({ page, request }) => {
   // Make Cat B slow, then click B and immediately C.
   await page.route("**/api/forecast/B?scenario=base", async (route) => {
@@ -82,6 +87,7 @@ test("a slow older category response never overwrites a newer one", async ({ pag
   await expect(page).toHaveURL(/#\/forecast\/C$/);
 });
 
+// this fails the forecast on purpose so that we know history stays on screen with a notice
 test("if the forecast is unavailable the page keeps the history and says so", async ({ page }) => {
   await page.route("**/api/forecast/A?scenario=base", (route) => route.fulfill({ status: 503, json: { detail: "No forecasts yet: the ML pipeline has not finished a run." } }));
   await page.route("**/api/recommendation/A?scenario=base", (route) => route.fulfill({ status: 503, json: { detail: "No forecasts yet." } }));
@@ -104,12 +110,14 @@ test("if the forecast is unavailable the page keeps the history and says so", as
   await expect(page.locator("#advice .outlook-label")).toBeVisible();
 });
 
+// this checks old links so that they still open the right page
 test("old supply-scenario links open the Scenario Lab", async ({ page }) => {
   await page.goto("/#/forecast/B?scenario=quota_plus_10");
   await expect(page).toHaveURL(/#\/scenario\/B\?quota=10$/);
   await expect(page.locator("#quota-out")).toHaveText("+10%");
 });
 
+// this checks the theme switch so that the viewer's state is kept
 test("switching theme keeps page state (no re-render)", async ({ page }) => {
   await page.goto("/#/scenario/B");
   await page.getByRole("button", { name: "+20% supply" }).click();

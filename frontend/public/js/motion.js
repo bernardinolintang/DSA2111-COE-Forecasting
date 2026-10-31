@@ -17,21 +17,24 @@ export const DURATION = {
   route: 300,     // page and shared-element transitions
 };
 
-// CSS strings for the Web Animations API (same curves as --ease-out etc.).
+// these are CSS strings for the Web Animations API (same curves as --ease-out etc.) so that JS and
+// CSS animate alike
 export const EASING = {
   out: "cubic-bezier(0.22, 1, 0.36, 1)",
   inOut: "cubic-bezier(0.65, 0, 0.35, 1)",
   in: "cubic-bezier(0.4, 0, 1, 1)",
 };
 
-// JS counterparts for rAF tweens.
+// these are JS versions for rAF tweens so that number counters ease the same way as CSS
 const easeOut = (t) => 1 - (1 - t) ** 4;                     // close to the CSS ease-out above
 const easeInOut = (t) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2);
 export const EASE_FN = { out: easeOut, inOut: easeInOut, linear: (t) => t };
 
+// this checks the OS setting so that animations can respect reduced motion
 const mq = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
 export const reducedMotion = () => Boolean(mq?.matches);
 
+// this mixes two values so that anything can be animated between them
 const lerp = (a, b, t) => a + (b - a) * t;
 export { lerp };
 
@@ -58,12 +61,12 @@ export function tween({ duration = DURATION.card, easing = "out", onUpdate, onDo
 // ---------------------------------------------------------------------------
 // Animated numbers
 // ---------------------------------------------------------------------------
+// these remember each number's state so that a new value can animate from what is on screen
 const numbers = new WeakMap();   // el -> { shown, anim }
 const busyCount = new WeakMap();
 
-// While a number counts, its live region is marked aria-busy so screen readers
-// announce the final value once, not every frame. Counted, because several
-// numbers can share one region (e.g. the recommendation card).
+// while a number counts its live region is marked aria-busy so that screen readers announce the
+// final value once, it is counted because several numbers can share one region
 function setBusy(el, on) {
   const region = el.closest?.("[aria-live]") || el;
   const n = Math.max(0, (busyCount.get(region) || 0) + (on ? 1 : -1));
@@ -80,6 +83,7 @@ function setBusy(el, on) {
 export function animateNumber(el, value, { format = String, duration = DURATION.card, animate = true } = {}) {
   if (!el) return;
   const s = numbers.get(el);
+  // this cancels a running animation so that a new value takes over smoothly
   if (s?.anim) { s.anim.cancel(); s.anim = null; setBusy(el, false); }
   const valid = typeof value === "number" && Number.isFinite(value);
   const fromValid = s && typeof s.shown === "number" && Number.isFinite(s.shown);
@@ -121,6 +125,7 @@ export function pulse(el) {
 // ---------------------------------------------------------------------------
 // Content swaps and entrances
 // ---------------------------------------------------------------------------
+// this tracks each element's swap so that a newer one can cancel the older one
 const swaps = new WeakMap();
 
 /**
@@ -135,6 +140,7 @@ export function swap(el, apply, { distance = 5, key, animate = true } = {}) {
   if (!el) return;
   const k = key ?? null;
   const prev = swaps.get(el);
+  // this just updates when the key is the same so that a small change does not flash
   if (k !== null && prev?.key === k) { prev.pending ? (prev.apply = apply) : apply(); return; }   // same state
   prev?.anim?.cancel();
   const entry = { key: k, anim: null, apply, pending: false };
@@ -217,9 +223,11 @@ export function attachThumb(group, { items = "button", attr = "aria-pressed", is
   let placed = false;
   let mo;
   let ro;
+  // this moves the thumb to the active item so that the selection always shows the real state
   function sync() {
     if (!group.isConnected) { mo.disconnect(); ro.disconnect(); return; }
     const el = [...group.querySelectorAll(items)].find(active);
+    // this hides the thumb when the item has no size so that it does not sit at 0,0
     if (!el || !el.offsetWidth) { thumb.style.opacity = "0"; placed = false; return; }
     const instant = !placed || reducedMotion();
     if (instant) thumb.style.transition = "none";
@@ -227,9 +235,12 @@ export function attachThumb(group, { items = "button", attr = "aria-pressed", is
     thumb.style.height = `${el.offsetHeight}px`;
     thumb.style.transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
     thumb.style.opacity = "1";
+    // this forces a reflow before turning transitions back on so that the first move does not
+    // animate
     if (instant) { void thumb.offsetWidth; thumb.style.transition = ""; }
     placed = true;
   }
+  // this watches for attribute changes and resizes so that the thumb stays in the right place
   mo = new MutationObserver(sync);
   mo.observe(group, { attributes: true, subtree: true, attributeFilter: [attr] });
   ro = new ResizeObserver(sync);
@@ -240,6 +251,7 @@ export function attachThumb(group, { items = "button", attr = "aria-pressed", is
 // ---------------------------------------------------------------------------
 // Shared-element navigation (View Transition API)
 // ---------------------------------------------------------------------------
+// this is the waiting transition so that the router can pick it up on the next route
 let pendingShared = null;
 
 export const supportsViewTransitions = () => typeof document !== "undefined" && typeof document.startViewTransition === "function";
@@ -256,6 +268,8 @@ export function requestShared(route, named) {
   pendingShared = { route, named, className: "vt-category" };
 }
 
+// this gives the router the waiting transition if it matches so that it only runs on the right
+// route
 export function takeShared(hash) {
   const p = pendingShared;
   pendingShared = null;
@@ -264,6 +278,7 @@ export function takeShared(hash) {
   return null;
 }
 
+// this clears any old names so that two elements never share a transition name
 function clearShared() {
   if (!pendingShared) return;
   for (const [el] of pendingShared.named) if (el) el.style.viewTransitionName = "";

@@ -3,6 +3,7 @@
 //   cd frontend && npm install && npx playwright test
 import { defineConfig } from "@playwright/test";
 
+// these are the test settings so that the suite runs against the local app in real Chrome
 export default defineConfig({
   testDir: "tests/e2e",
   timeout: 45_000,

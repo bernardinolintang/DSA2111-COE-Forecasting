@@ -3,6 +3,7 @@
 
 import { expect, test } from "./fixtures.js";
 
+// this walks through the main pages so that any console error fails the test
 test("main journey has no console errors", async ({ page, problems }) => {
   await page.goto("/");
   await expect(page.locator("#cards .cat-card")).toHaveCount(5);
@@ -46,6 +47,7 @@ test("main journey has no console errors", async ({ page, problems }) => {
 
 const ROUTES = ["/", "/#/forecast/A", "/#/scenario/A?quota=12", "/#/bid/A", "/#/plan?intent=buy", "/#/plan?intent=renew", "/#/policy/B",
                 "/#/model?section=technical", "/#/alerts", "/#/learn", "/#/learn/how", "/#/learn/sources", "/#/learn/faq", "/#/learn/about"];
+// this runs at phone and desktop widths so that no page scrolls sideways
 for (const width of [375, 768, 1024, 1440]) {
   test(`no horizontal overflow at ${width}px`, async ({ page }) => {
     test.setTimeout(90_000);
@@ -61,6 +63,7 @@ for (const width of [375, 768, 1024, 1440]) {
   });
 }
 
+// this checks the navigation layout so that each section shows the right tabs
 test("the main navigation has five places and each section shows its pages", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".nav-links a")).toHaveText(["Overview", "Forecast", "Plan", "Explore", "Learn"]);
@@ -85,6 +88,7 @@ test("the main navigation has five places and each section shows its pages", asy
   await expect(page.locator('.subnav a[aria-current="page"]')).toHaveText("Model performance");
 });
 
+// this checks the status bar so that it shows on every page
 test("the market status bar is on every page", async ({ page, request }) => {
   const s = await (await request.get("/api/summary")).json();
   for (const url of ["/", "/#/bid/B", "/#/learn/faq"]) {
@@ -101,6 +105,7 @@ test("the market status bar is on every page", async ({ page, request }) => {
   await expect(page).toHaveURL(/#\/forecast\/D$/);
 });
 
+// this checks scroll handling so that Back returns to the same spot
 test("Back restores the scroll position; new navigations start at the top", async ({ page }) => {
   await page.goto("/#/forecast/A");
   await expect(page.locator("#steps tbody tr")).toHaveCount(6);
@@ -113,6 +118,7 @@ test("Back restores the scroll position; new navigations start at the top", asyn
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(700);
 });
 
+// this checks the keyboard paths so that the app works without a mouse
 test("keyboard: skip link, focusable nav and Escape closes Ask Compass", async ({ page }) => {
   await page.goto("/");
   await page.keyboard.press("Tab");
@@ -126,6 +132,7 @@ test("keyboard: skip link, focusable nav and Escape closes Ask Compass", async (
   await expect(page.locator("#ask-compass")).toBeFocused();
 });
 
+// this checks the home page so that visitors start from what they want to do
 test("the home page starts from what the visitor wants to do", async ({ page, request, problems }) => {
   const s = await (await request.get("/api/summary")).json();
   await page.goto("/");

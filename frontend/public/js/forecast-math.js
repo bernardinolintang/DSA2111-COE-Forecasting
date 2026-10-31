@@ -1,6 +1,7 @@
 // Pure forecast arithmetic used by the Scenario Lab, the Bid planner and My plan.
 // No DOM, so it is unit-tested in Node (tests/unit/forecast-math.test.js).
 
+// these are the stored quantile columns so that the loops below stay short
 const QUANTILES = ["q05", "q10", "q25", "q50", "q75", "q90", "q95"];
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -54,6 +55,7 @@ export function scenarioDelta(median, baseMedian, pct) {
 // ---------------------------------------------------------------------------
 // Probabilities from a forecast step
 // ---------------------------------------------------------------------------
+// these are the probability levels of those columns so that a step can become a curve
 const LEVELS = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95];
 
 /**
@@ -133,8 +135,10 @@ export function explainBid(plan, bid, money) {
 // ---------------------------------------------------------------------------
 // Renewal: Prevailing Quota Premium (PQP)
 // ---------------------------------------------------------------------------
+// this cuts a date to YYYY-MM so that months can be compared as text
 const monthKey = (m) => String(m).slice(0, 7);
 
+// this moves a month forward or back so that the PQP window can be built
 function addMonths(key, n) {
   const [y, m] = key.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 1 + n, 1));
@@ -151,12 +155,15 @@ function addMonths(key, n) {
  */
 export function pqpFor(month, history, steps = []) {
   const target = monthKey(month);
+  // this is the three months before the target so that it follows the PQP rule
   const window = [addMonths(target, -3), addMonths(target, -2), addMonths(target, -1)];
   const actual = new Map(history.map((h) => [`${monthKey(h.month)}|${h.bidding_no}`, h.premium]));
   const fc = new Map(steps.map((s) => [`${monthKey(s.month)}|${s.bidding_no}`, s.q50]));
   let sum = 0;
   let nActual = 0;
   let nForecast = 0;
+  // this uses the real result if there is one or the forecast if not so that the estimate gets
+  // better over time
   for (const m of window) {
     for (const b of [1, 2]) {
       const key = `${m}|${b}`;

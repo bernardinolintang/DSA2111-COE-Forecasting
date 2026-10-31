@@ -29,10 +29,12 @@ from .parallel import parallel_map
 
 log = logging.getLogger(__name__)
 
+# these are the ARIMA orders to try so that AIC can pick the best one per category
 ARIMA_ORDERS = [(p, 1, q) for p in range(3) for q in range(3)]
 MIN_BEFORE, MIN_AFTER = 12, 6     # exercises needed on each side of an event
 
 
+# this holds the result for one category so that the order, AIC and effects stay together
 @dataclass
 class InterventionResult:
     category: str
@@ -51,6 +53,8 @@ def identifiable_events(dummies: pd.DataFrame) -> list[str]:
     return keep
 
 
+# this fits one regression with ARIMA errors so that the policy dummies and normal market moves are
+# estimated together
 def fit_sarimax(y: np.ndarray, exog: np.ndarray | None, order) -> "SARIMAX":
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")   # convergence chatter on short series
@@ -64,6 +68,7 @@ def select_and_fit(y: np.ndarray, exog: np.ndarray | None):
     best = None
     for order in ARIMA_ORDERS:
         try:
+            # this skips an order that fails so that one bad fit does not stop the category
             res = fit_sarimax(y, exog, order)
         except Exception:     # singular designs etc. — just try the next order
             continue
@@ -83,6 +88,8 @@ def _fit_category(args) -> InterventionResult:
 
     effects = []
     if cols:
+        # this takes the first values of the fit since those are the dummies so that they line up
+        # with cols
         params = np.asarray(res.params)[: len(cols)]
         bse = np.asarray(res.bse)[: len(cols)]
         pvalues = np.asarray(res.pvalues)[: len(cols)]
@@ -92,6 +99,8 @@ def _fit_category(args) -> InterventionResult:
             ref_bc = float(np.mean(bc[max(0, onset - 12): onset]))   # level just before the event
             base = scaler_inverse_bc(scaler, cat, ref_bc)
 
+            # this turns a Box-Cox shift into a percent change from the pre-event level so that the
+            # Policy Lab can show plain percentages
             def pct(delta: float) -> float:
                 return float(scaler_inverse_bc(scaler, cat, ref_bc + delta) / base - 1.0) * 100
 
@@ -115,6 +124,7 @@ def scaler_inverse_bc(scaler: TargetScaler, cat: str, bc_value: float) -> float:
 
 def fit_interventions(panel: pd.DataFrame, scaler: TargetScaler, n_workers: int = 1) -> list[InterventionResult]:
     """Fit Box-Tiao models for every category on the given (training) panel."""
+    # this builds one job per category so that the five fits can run at the same time
     jobs = []
     for cat, grp in panel.sort_values("time_idx").groupby("category"):
         bc = scaler.boxcox(cat, grp["premium"].to_numpy())
@@ -122,6 +132,7 @@ def fit_interventions(panel: pd.DataFrame, scaler: TargetScaler, n_workers: int 
 
     results = parallel_map(_fit_category, jobs, n_workers)
 
+    # this logs every effect so that a run can be checked from the logs
     for r in results:
         summary = ", ".join(f"{e['event_code']}={e['pct_effect']:+.1f}%" for e in r.effects)
         log.info("Box-Tiao %s ARIMA%s: %s", r.category, r.order, summary or "no identifiable events")

@@ -18,6 +18,7 @@ import {
   outlookPill, parseMoney, provenance, rangeShort, segmented, store, toast,
 } from "../util.js";
 
+// these are the storage key and form options so that answers can be saved and restored
 const KEY = "coe-plan";
 const INTENTS = [
   { value: "buy", label: "Buying a car" }, { value: "renew", label: "Renewing COE" }, { value: "explore", label: "Exploring" },
@@ -25,11 +26,13 @@ const INTENTS = [
 const TIMINGS = [
   { value: "next", label: "Next exercise" }, { value: "quarter", label: "In 3 months" }, { value: "later", label: "Not sure yet" },
 ];
+// these format months and chances so that the sentences read well
 const monthName = (key) => new Date(`${key}-01T00:00:00Z`).toLocaleDateString("en-SG", { month: "short", year: "numeric", timeZone: "UTC" });
 const chance = (p) => (p > 0.995 ? "over 99%" : p < 0.005 ? "under 1%" : `${Math.round(p * 100)}%`);
 /** A round level to watch: $1,000 steps for cars, $100 for motorcycles. */
 const roundLevel = (v) => { const step = v < 30_000 ? 100 : 1000; return Math.round(v / step) * step; };
 
+// this draws the page, answers come from this browser so that nothing personal goes to the server
 export async function render(root, { query = {} } = {}) {
   const saved = store.get(KEY, {}) || {};
   const state = {
@@ -78,8 +81,10 @@ export async function render(root, { query = {} } = {}) {
   let loadToken = 0;
   let firstPaint = true;
 
+  // this saves answers so that coming back keeps the plan
   const save = () => store.set(KEY, state);
 
+  // this updates the form so that it matches the intent and category
   function paintForm() {
     const m = metaOf(state.category);
     const renew = state.intent === "renew";
@@ -90,9 +95,12 @@ export async function render(root, { query = {} } = {}) {
     $("#plan-budget-field").hidden = renew;
   }
 
-  // ---- the plan ----
+  // ---- the plan: everything below builds the summary on the right so that it updates as the form
+  // changes ----
+  // this builds one row of the summary so that all rows look the same
   const row = (label, body, term) => html`<div class="plan-row"><dt>${label}${term ? html` ${explain(term[0], term[1])}` : ""}</dt><dd>${body}</dd></div>`;
 
+  // this compares the budget with the forecast so that the viewer sees where it sits
   function budgetRow(next, end) {
     if (!state.budget) {
       return row("Your budget", html`<span class="muted">Add a COE budget on the left to see how it compares with the forecast.</span>`);
@@ -108,6 +116,7 @@ export async function render(root, { query = {} } = {}) {
       </ul>`);
   }
 
+  // this builds the summary for a buyer so that it shows the outlook, range and a level to watch
   function buyPlan() {
     const { card, forecast } = data;
     const s = card.signal;
@@ -143,6 +152,7 @@ export async function render(root, { query = {} } = {}) {
       </div>`;
   }
 
+  // this builds the summary for a renewal so that it shows the estimated PQP path
   function renewPlan() {
     const { card, forecast, history } = data;
     if (state.category === "E") {
@@ -179,6 +189,7 @@ export async function render(root, { query = {} } = {}) {
       </div>`;
   }
 
+  // this redraws the summary so that it always matches the answers
   function paint() {
     if (!data) return;
     const m = metaOf(state.category);
@@ -197,6 +208,7 @@ export async function render(root, { query = {} } = {}) {
     result.removeAttribute("aria-busy");
     if (!firstPaint) enter(result.querySelector(".plan-rows, .notice"), { rise: 4 });
     firstPaint = false;
+    // this tells the analyst what is on screen so that its answers match the page
     const s = card?.signal;
     setView({ category: state.category, facts: [
       { label: "Planning", value: INTENTS.find((i) => i.value === state.intent).label },
@@ -206,6 +218,7 @@ export async function render(root, { query = {} } = {}) {
     ] });
   }
 
+  // this loads the category's data so that a late response cannot replace a newer one
   async function load() {
     const token = ++loadToken;
     const cat = state.category;
@@ -225,9 +238,11 @@ export async function render(root, { query = {} } = {}) {
     }
   }
 
+  // these connect the form so that any change updates the plan right away
   onSegment(root, "intent", (v) => { state.intent = v; save(); paintForm(); paint(); });
   onSegment(root, "timing", (v) => { state.timing = v; save(); paint(); });
   onSegment(root, "plan-cat", (c) => { state.category = c; save(); paintForm(); load(); });
+  // this checks the budget as it is typed so that mistakes show up early
   budgetInput.addEventListener("input", () => {
     const r = parseMoney(budgetInput.value, { what: "a budget" });
     const invalid = !r.ok && !r.empty;
@@ -242,9 +257,11 @@ export async function render(root, { query = {} } = {}) {
   budgetInput.addEventListener("blur", () => {
     if (state.budget && budgetInput.getAttribute("aria-invalid") !== "true") budgetInput.value = new Intl.NumberFormat("en-SG").format(state.budget);
   });
+  // this stops the form reloading the page so that Enter does nothing bad
   $("#plan-form").addEventListener("submit", (e) => e.preventDefault());
 
-  // "Watch this level": the one thing this page saves on the server, and only on click.
+  // "Watch this level": the one thing this page saves on the server, and only on click so that the
+  // rest stays private
   result.addEventListener("click", async (e) => {
     const btn = e.target.closest("#plan-watch");
     if (!btn || btn.disabled) return;

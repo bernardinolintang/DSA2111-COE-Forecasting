@@ -16,6 +16,7 @@ from app.db import engine
 from app.main import app
 
 
+# this checks for a finished run so that these tests skip when there is no database
 def _database_ready() -> bool:
     try:
         with engine.connect() as conn:
@@ -24,20 +25,24 @@ def _database_ready() -> bool:
         return False
 
 
+# this applies the skip to the whole file so that each test does not need to check
 pytestmark = pytest.mark.skipif(not _database_ready(), reason="needs Postgres with at least one model run")
 
 
+# this shares one test client so that the app only starts once per file
 @pytest.fixture(scope="module")
 def client():
     with TestClient(app) as c:
         yield c
 
 
+# this checks the health route so that Docker and Kubernetes get a good answer
 def test_health(client):
     body = client.get("/api/health").json()
     assert body["status"] == "ok" and body["latest_run"] is not None
 
 
+# this checks every category card is complete so that the home page never misses a field
 def test_summary_has_all_categories(client):
     body = client.get("/api/summary").json()
     assert [c["code"] for c in body["categories"]] == ["A", "B", "C", "D", "E"]
@@ -52,9 +57,11 @@ def test_summary_has_all_categories(client):
         assert {d["key"] for d in s["drivers"]} == {"demand", "quota", "uncertainty"}
         assert c["next_label"] == body["next_exercise"]["label"]
         assert c["next_q10"] <= c["next_q50"] <= c["next_q90"]
+        # this keeps the wording neutral so that the app never gives a buy or wait call
         assert "buy" not in s["summary"].lower() and "wait" not in s["summary"].lower()
 
 
+# this compares two routes so that the home page and Forecast page always agree
 def test_recommendation_matches_summary_signal(client):
     """The overview card and the forecast page must never disagree."""
     cards = {c["code"]: c["signal"] for c in client.get("/api/summary").json()["categories"]}
@@ -63,6 +70,7 @@ def test_recommendation_matches_summary_signal(client):
         assert {k: rec[k] for k in signal} == signal
 
 
+# this checks the slider maths so that in-between values really are interpolated
 def test_quota_pct_interpolates_between_modelled_scenarios(client):
     end = lambda query: client.get(f"/api/forecast/A?{query}").json()["steps"][-1]  # noqa: E731
     plus10, plus15, plus20 = end("scenario=quota_plus_10"), end("quota_pct=15"), end("scenario=quota_plus_20")
@@ -77,6 +85,7 @@ def test_quota_pct_interpolates_between_modelled_scenarios(client):
     assert {s["quota_pct"] for s in client.get("/api/scenarios").json()} == {-20, -10, 0, 10, 20}
 
 
+# this checks the quantiles stay in order so that the ranges on screen make sense
 @pytest.mark.parametrize("scenario", ["base", "quota_plus_20", "quota_minus_20"])
 def test_forecast_quantiles_are_ordered(client, scenario):
     steps = client.get(f"/api/forecast/A?scenario={scenario}").json()["steps"]
@@ -85,12 +94,14 @@ def test_forecast_quantiles_are_ordered(client, scenario):
         assert s["q05"] <= s["q10"] <= s["q25"] <= s["q50"] <= s["q75"] <= s["q90"] <= s["q95"]
 
 
+# this checks the supply direction so that more COEs never push the forecast up
 def test_more_supply_does_not_raise_prices(client):
     low = client.get("/api/forecast/B?scenario=quota_minus_20").json()["steps"][-1]["q50"]
     high = client.get("/api/forecast/B?scenario=quota_plus_20").json()["steps"][-1]["q50"]
     assert high <= low * 1.02
 
 
+# this checks the win curve only goes up so that a higher bid never looks worse
 def test_bid_planner_probability_increases_with_bid(client):
     plan = client.get("/api/bid-planner/A").json()
     probs = [p["probability_pct"] for p in plan["curve"]]
@@ -98,10 +109,12 @@ def test_bid_planner_probability_increases_with_bid(client):
     assert plan["q10"] <= plan["q25"] <= plan["expected_premium"] <= plan["q75"] <= plan["q90"]
 
 
+# this checks a bad category so that users get a clean 404
 def test_unknown_category_is_404(client):
     assert client.get("/api/forecast/Z").status_code == 404
 
 
+# this checks the policy and model routes so that those pages have data
 def test_policy_and_model_endpoints(client):
     assert len(client.get("/api/policy/events").json()) >= 5
     assert client.get("/api/model/metrics").json()["leaderboard"]
@@ -109,6 +122,7 @@ def test_policy_and_model_endpoints(client):
     assert client.get("/api/model/backtest/A?model=tft&horizon=1").json()["points"]
 
 
+# this checks add, list and delete so that a target can go through its whole life
 def test_alert_lifecycle(client):
     cid = str(uuid.uuid4())
     created = client.post("/api/alerts", json={"client_id": cid, "category": "A", "direction": "below",
@@ -121,6 +135,7 @@ def test_alert_lifecycle(client):
     assert client.get(f"/api/alerts?client_id={cid}").json() == []
 
 
+# this checks duplicates and bad values so that the watchlist stays clean
 def test_alert_shows_forecast_context_and_rejects_duplicates_and_bad_targets(client):
     cid = str(uuid.uuid4())
     body = {"client_id": cid, "category": "B", "direction": "below", "target": 100000}
@@ -147,11 +162,13 @@ def basic_mode(monkeypatch):
     monkeypatch.setattr(analyst_router, "settings", dataclasses.replace(analyst_router.settings, analyst_provider="offline"))
 
 
+# this sends one question so that the tests below stay short
 def _ask(client, question, **view):
     return client.post("/api/analyst/chat", json={"messages": [{"role": "user", "content": question}],
                                                   "view": view, "client_id": str(uuid.uuid4())})
 
 
+# this checks the glossary terms the UI needs so that no popover is empty
 def test_glossary_and_status(client):
     terms = {t["id"]: t for t in client.get("/api/glossary").json()}
     assert {"range-80", "significance", "box-tiao", "outlook", "uncertainty", "pqp", "smape", "attention"} <= set(terms)
@@ -159,6 +176,7 @@ def test_glossary_and_status(client):
     assert client.get("/api/analyst/status").json()["mode"] in ("llm", "offline")
 
 
+# this checks a navigate action comes back so that the panel can open pages
 def test_analyst_navigation_and_provenance(client):
     res = _ask(client, "Show me Cat E", page="overview")
     assert res.status_code == 200
@@ -168,6 +186,7 @@ def test_analyst_navigation_and_provenance(client):
     assert body["provenance"] and "bidding exercise" in body["provenance"]
 
 
+# this checks alerts are drafts so that nothing saves until the user confirms
 def test_analyst_alert_requests_need_confirmation(client):
     body = _ask(client, "Alert me when Cat A falls below $110k", page="alerts").json()
     drafts = [a for a in body["actions"] if a["type"] == "prepare_watch"]
@@ -175,6 +194,7 @@ def test_analyst_alert_requests_need_confirmation(client):
     assert drafts[0]["params"]["target"] == 110000
 
 
+# this checks the event order so that the browser can show the answer as it streams
 def test_analyst_streams_server_sent_events(client):
     body = {"messages": [{"role": "user", "content": "Show me Cat E"}], "view": {"page": "overview"}}
     with client.stream("POST", "/api/analyst/chat?stream=1", json=body) as res:
@@ -188,6 +208,7 @@ def test_analyst_streams_server_sent_events(client):
     assert done["mode"] in ("llm", "offline") and done["provenance"]
 
 
+# this checks the analyst follows the slider so that it talks about the value on screen
 def test_analyst_sees_the_scenario_lab_slider(client):
     body = _ask(client, "Why is Cat A showing this outlook?", page="scenario", category="A", quota_pct=15).json()
     assert "+15% supply" in body["provenance"]
@@ -197,11 +218,13 @@ def test_analyst_sees_the_scenario_lab_slider(client):
     assert _ask(client, "hi", page="scenario", quota_pct=40).status_code == 422
 
 
+# this checks the neutral wording so that the analyst never tells people to buy or wait
 def test_analyst_does_not_tell_people_to_buy_or_wait(client):
     reply = _ask(client, "Should I buy now or wait?", page="forecast", category="A").json()["reply"]
     assert "doesn't tell you to buy or to wait" in reply and "Cat A shows" in reply
 
 
+# this checks bad requests are refused so that the API cannot be fed junk
 def test_analyst_validates_requests(client):
     assert client.post("/api/analyst/chat", json={"messages": []}).status_code == 422
     too_long = [{"role": "user", "content": "x" * 1001}]

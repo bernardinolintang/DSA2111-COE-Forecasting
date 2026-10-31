@@ -8,19 +8,23 @@ from app.services import quantiles as qt
 from app.services import scenarios as sc
 from app.services.recommendation import advise, alert_outlook, outlook_for, uncertainty_for
 
+# this is a fake forecast so that the maths can be tested without a database
 VALUES = [80.0, 85.0, 92.0, 100.0, 108.0, 115.0, 120.0]     # p5 ... p95
 
 
+# this checks the curve passes through each stored quantile so that the interpolation is exact there
 def test_cdf_hits_every_quantile_level():
     for level, value in zip(qt.LEVELS, VALUES):
         assert qt.cdf(VALUES, value) == pytest.approx(level)
 
 
+# this checks cdf and quantile undo each other so that bid and chance always agree
 def test_cdf_and_quantile_are_inverses():
     for p in [0.02, 0.2, 0.5, 0.66, 0.97]:
         assert qt.cdf(VALUES, qt.quantile(VALUES, p)) == pytest.approx(p)
 
 
+# this checks the curve stays between 0 and 1 and only rises so that it is a real distribution
 def test_cdf_is_bounded_and_monotone():
     xs = range(0, 200, 5)
     ps = [qt.cdf(VALUES, x) for x in xs]
@@ -28,6 +32,7 @@ def test_cdf_is_bounded_and_monotone():
     assert all(b >= a for a, b in zip(ps, ps[1:]))
 
 
+# this builds fake forecast rows so that each test can set its own path
 def _steps(median_path):
     """Forecast rows whose quantiles are spread ±15% around the given medians."""
     rows = []
@@ -37,6 +42,7 @@ def _steps(median_path):
     return rows
 
 
+# this checks a clear drop gives the strong label so that the rule matches the docs
 def test_downward_pressure_when_the_odds_lean_clearly_lower():
     advice = advise("Cat A", 100_000, _steps([98_000, 95_000, 90_000]), [], threshold=0.08)
     assert (advice.outlook, advice.label) == ("easing", "Downward pressure")
@@ -46,21 +52,25 @@ def test_downward_pressure_when_the_odds_lean_clearly_lower():
     assert "more likely to fall than rise" in advice.summary
 
 
+# this checks a small drop gives the slight label so that weak signals are not overstated
 def test_slight_downward_pressure_when_the_drop_is_small():
     advice = advise("Cat A", 100_000, _steps([99_000, 97_000, 96_000]), [], threshold=0.08)
-    # the median is 4% lower: a fall is more likely than a rise, but it is not a clear call
+    # the median is 4% lower: a fall is more likely than a rise, but not a clear call so that the
+    # slight label is the right one
     assert (advice.outlook, advice.label) == ("softer", "Slight downward pressure")
     assert advice.strength == "slight" and advice.meaningful_drop is False
     assert 55 <= advice.prob_lower_pct < 65
     assert "Slight downward pressure on Cat A" in advice.summary
 
 
+# this checks rising prices give the upward label so that both directions work
 def test_upward_pressure_when_prices_rise():
     advice = advise("Cat B", 100_000, _steps([103_000, 106_000, 110_000]), [], threshold=0.08)
     assert (advice.outlook, advice.label) == ("rising", "Upward pressure")
     assert advice.direction == "up" and advice.prob_higher_pct >= 65
 
 
+# this checks the usual flat case so that small leans stay "No clear direction"
 def test_flat_forecast_shows_no_clear_direction():
     """The case from the demo: median ~1% above today with wide ranges."""
     advice = advise("Cat A", 131_890, _steps([133_000, 133_300]), [], threshold=0.08)
@@ -70,6 +80,7 @@ def test_flat_forecast_shows_no_clear_direction():
     assert "a fall is about as likely as a rise" in advice.summary
 
 
+# this checks every outlook's wording so that the app never tells anyone to buy or wait
 def test_the_outlook_never_tells_anyone_to_buy_or_wait():
     for path in ([85_000], [96_000], [100_000], [104_000], [115_000]):
         advice = advise("Cat A", 100_000, _steps(path), [], threshold=0.08)
@@ -77,6 +88,8 @@ def test_the_outlook_never_tells_anyone_to_buy_or_wait():
         assert "buy" not in text and "wait" not in text
 
 
+# this checks the drop chance uses the 8% level so that it is a smaller number than the chance of
+# any fall
 def test_prob_drop_is_the_chance_of_a_meaningful_fall():
     steps = _steps([100_000])                    # quantiles 80k ... 120k around a flat median
     advice = advise("Cat A", 100_000, steps, [], threshold=0.08)
@@ -86,6 +99,7 @@ def test_prob_drop_is_the_chance_of_a_meaningful_fall():
     assert "A drop of 8% or more has a 25% chance" in advice.summary
 
 
+# this checks the thresholds and next exercise so that the labels change at the right points
 def test_uncertainty_levels_and_next_exercise():
     assert [uncertainty_for(w) for w in (5, 12, 20)] == ["low", "moderate", "high"]
     assert [outlook_for(p) for p in (0.7, 0.6, 0.5, 0.4, 0.3)] == ["easing", "softer", "steady", "firmer", "rising"]
@@ -94,6 +108,7 @@ def test_uncertainty_levels_and_next_exercise():
     assert advice.uncertainty_pct == pytest.approx(15.0) and advice.drivers[-1]["key"] == "uncertainty"
 
 
+# this feeds in a known history so that the demand and quota drivers can be checked exactly
 def test_drivers_compare_demand_and_quota_with_a_year_ago():
     history = [{"bids_received": 1500, "quota": 1000} for _ in range(23)] + [{"bids_received": 1100, "quota": 1100}]
     advice = advise("Cat A", 100_000, _steps([100_000]), history, threshold=0.08)
@@ -103,6 +118,7 @@ def test_drivers_compare_demand_and_quota_with_a_year_ago():
     assert advice.reasons[1] == "Supply: quota is 1,100 per exercise, +10% versus a year ago."
 
 
+# this checks the scenario line between modelled points so that nothing is extrapolated
 def test_scenario_steps_interpolate_between_modelled_runs():
     runs = {"base": _steps([100_000, 100_000]), "quota_plus_10": _steps([100_000, 98_000]),
             "quota_plus_20": _steps([100_000, 96_000])}
@@ -119,6 +135,7 @@ def test_scenario_steps_interpolate_between_modelled_runs():
     assert sc.scenario_id(15) is None and sc.scenario_id(-20) == "quota_minus_20"
 
 
+# this checks the three watchlist statuses so that targets are scored the right way
 def test_alert_outlook():
     steps = _steps([95_000, 90_000])
     assert alert_outlook("below", 120_000, 100_000, steps)["status"] == "triggered"
@@ -126,6 +143,7 @@ def test_alert_outlook():
     assert alert_outlook("below", 50_000, 100_000, steps)["status"] == "unlikely"
 
 
+# this checks the context fields so that the watchlist can show what the forecast says next
 def test_alert_outlook_reports_next_and_horizon_medians():
     o = alert_outlook("below", 91_000, 100_000, _steps([95_000, 90_000]))
     assert o["next_q50"] == pytest.approx(95_000) and o["horizon_q50"] == pytest.approx(90_000)

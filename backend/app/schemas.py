@@ -8,9 +8,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+# this limits category codes to A-E so that a bad code is rejected at the API edge
 CategoryCode = Literal["A", "B", "C", "D", "E"]
 
 
+# this is the run info shown under forecasts so that users can see which run made them
 class RunInfo(BaseModel):
     id: int
     created_at: datetime
@@ -21,11 +23,13 @@ class RunInfo(BaseModel):
     duration_s: float | None = None
 
 
+# this adds the settings and metrics for pages that need the full run
 class RunDetail(RunInfo):
     params: dict = {}
     metrics: dict = {}
 
 
+# this is the health check response so that Docker and Kubernetes can read the status
 class Health(BaseModel):
     status: Literal["ok", "degraded"]
     database: bool
@@ -33,6 +37,7 @@ class Health(BaseModel):
     version: str
 
 
+# this describes one category so that the front end can label it
 class Category(BaseModel):
     code: CategoryCode
     name: str
@@ -40,12 +45,14 @@ class Category(BaseModel):
     description: str
 
 
+# this is one bidding exercise so that other models can extend it
 class Exercise(BaseModel):
     month: date
     bidding_no: int
     label: str
 
 
+# this adds the recorded results of an exercise so that charts have the real numbers
 class HistoryPoint(Exercise):
     premium: int
     quota: int
@@ -53,11 +60,13 @@ class HistoryPoint(Exercise):
     bids_success: int
 
 
+# this is one category's history so that the chart gets all its points in one reply
 class History(BaseModel):
     category: CategoryCode
     points: list[HistoryPoint]
 
 
+# this is one forecast step with its quantiles so that the page can draw the ranges
 class ForecastStep(Exercise):
     step: int
     quota: int | None
@@ -70,6 +79,7 @@ class ForecastStep(Exercise):
     q95: float
 
 
+# this is the full forecast response so that the fan chart has its run, start point and steps
 class Forecast(BaseModel):
     category: CategoryCode
     scenario: str                      # a modelled scenario id, or "custom" for an interpolated point
@@ -79,6 +89,7 @@ class Forecast(BaseModel):
     steps: list[ForecastStep]
 
 
+# this describes one supply scenario so that the page can build its controls
 class Scenario(BaseModel):
     id: str
     label: str
@@ -90,6 +101,7 @@ class Scenario(BaseModel):
 Outlook = Literal["easing", "softer", "steady", "firmer", "rising"]
 
 
+# this is one piece of evidence behind an outlook so that cards can show it as a chip
 class Driver(BaseModel):
     key: Literal["demand", "quota", "uncertainty"]
     title: str
@@ -98,6 +110,7 @@ class Driver(BaseModel):
     text: str
 
 
+# this is the compact outlook so that cards can show it without the full detail
 class Signal(BaseModel):
     """The market outlook: which way the forecast leans and how clearly. Not advice."""
     outlook: Outlook
@@ -114,6 +127,7 @@ class Signal(BaseModel):
     drivers: list[Driver]
 
 
+# this is a category plus its market numbers so that the home page needs one request
 class CategorySummary(Category):
     latest: HistoryPoint
     previous_premium: int | None
@@ -132,6 +146,7 @@ class CategorySummary(Category):
     signal: Signal | None
 
 
+# this is the whole home page response so that one call fills the page
 class Summary(BaseModel):
     run: RunInfo | None
     data_through: Exercise | None
@@ -139,6 +154,7 @@ class Summary(BaseModel):
     categories: list[CategorySummary]
 
 
+# this is the full outlook so that the Forecast page can show all the evidence
 class Recommendation(Signal):
     category: CategoryCode
     scenario: str
@@ -159,16 +175,19 @@ class Recommendation(Signal):
     reasons: list[str]
 
 
+# this is one point on the win curve so that the bid chart can be drawn
 class BidPoint(BaseModel):
     bid: float
     probability_pct: float
 
 
+# this is one suggested bid so that the page can list quick picks
 class BidSuggestion(BaseModel):
     confidence_pct: int
     bid: float
 
 
+# this is the bid planner response so that one call fills the page
 class BidPlan(BaseModel):
     category: CategoryCode
     exercise: Exercise
@@ -183,6 +202,7 @@ class BidPlan(BaseModel):
     curve: list[BidPoint]
 
 
+# this is one estimated policy effect so that the Policy Lab can draw its bars
 class PolicyEffect(BaseModel):
     category: CategoryCode
     pct_effect: float
@@ -192,6 +212,7 @@ class PolicyEffect(BaseModel):
     significant: bool
 
 
+# this is a policy event with its effects so that the timeline has both
 class PolicyEvent(BaseModel):
     code: str
     name: str
@@ -204,6 +225,7 @@ class PolicyEvent(BaseModel):
     effects: list[PolicyEffect]
 
 
+# this is one model's score so that the leaderboard can list them
 class ModelScore(BaseModel):
     model: str
     label: str
@@ -219,6 +241,7 @@ class ModelScore(BaseModel):
     direction: float | None
 
 
+# this is the model page response so that all the tables come in one call
 class Metrics(BaseModel):
     run: RunDetail
     test_period: dict
@@ -227,6 +250,7 @@ class Metrics(BaseModel):
     by_category: list[ModelScore]
 
 
+# this is one predicted against actual point so that the chart can be drawn
 class BacktestPoint(Exercise):
     actual: float
     q10: float | None
@@ -234,6 +258,7 @@ class BacktestPoint(Exercise):
     q90: float | None
 
 
+# this is a backtest series so that the page knows which model and horizon it shows
 class Backtest(BaseModel):
     category: CategoryCode
     model: str
@@ -241,18 +266,22 @@ class Backtest(BaseModel):
     points: list[BacktestPoint]
 
 
+# this is one variable's importance so that the chart has a label and a value
 class Importance(BaseModel):
     variable: str
     label: str
     importance: float
 
 
+# this is the interpretability response so that past inputs, future inputs and attention come
+# together
 class Interpretability(BaseModel):
     encoder: list[Importance]
     decoder: list[Importance]
     attention: dict[str, list[dict]]
 
 
+# this is one glossary entry so that popovers get both explanation levels
 class GlossaryTerm(BaseModel):
     id: str
     term: str
@@ -260,17 +289,20 @@ class GlossaryTerm(BaseModel):
     technical: str
 
 
+# this says which analyst mode is on so that the panel can show it
 class AnalystStatus(BaseModel):
     mode: Literal["llm", "offline"]
     provider: Literal["groq", "anthropic", "offline"]
     model: str | None
 
 
+# this is one chat message so that the conversation has a clear shape
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(min_length=1, max_length=6000)
 
 
+# this is where the viewer is so that the server can rebuild the numbers itself
 class AnalystView(BaseModel):
     """Where the viewer is. Only identifiers: the numbers are re-read on the server."""
     page: Literal["overview", "forecast", "scenario", "bid", "plan", "policy", "model", "alerts", "learn"] = "overview"
@@ -281,6 +313,7 @@ class AnalystView(BaseModel):
     event: str | None = Field(default=None, max_length=64)
 
 
+# this is one analyst request so that the size of the chat can be limited
 class AnalystRequest(BaseModel):
     messages: list[ChatTurn] = Field(min_length=1, max_length=30)
     view: AnalystView = AnalystView()
@@ -296,6 +329,7 @@ class AnalystRequest(BaseModel):
         return messages
 
 
+# this is one app action so that the browser knows what to do and if it needs Confirm
 class AnalystAction(BaseModel):
     type: Literal["navigate", "set_supply_scenario", "set_bid_amount", "highlight", "open_tutorial",
                   "prepare_watch", "prepare_remove_watch"]
@@ -304,6 +338,7 @@ class AnalystAction(BaseModel):
     summary: str
 
 
+# this is the analyst reply so that text, actions and source line arrive together
 class AnalystReply(BaseModel):
     reply: str
     actions: list[AnalystAction]
@@ -312,6 +347,7 @@ class AnalystReply(BaseModel):
     notice: str | None
 
 
+# this is what a user sends to save a target so that the inputs can be checked
 class AlertIn(BaseModel):
     client_id: UUID
     category: CategoryCode
@@ -320,6 +356,7 @@ class AlertIn(BaseModel):
     label: str | None = Field(default=None, max_length=80)
 
 
+# this is a saved target with its score so that the watchlist can show the odds
 class Alert(BaseModel):
     id: int
     category: CategoryCode

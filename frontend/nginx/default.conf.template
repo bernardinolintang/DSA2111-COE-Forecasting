@@ -8,15 +8,18 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # this compresses text files so that pages load faster
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
     gzip_min_length 1024;
 
+    # these security headers stop content sniffing and limit referrers so that the site is safer by
+    # default
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
 
-    # The COE Analyst may call a language model and a few tools per question,
-    # so it gets a longer read timeout than the rest of the API.
+    # the COE Analyst may call a language model and a few tools per question so that it gets a
+    # longer read timeout than the rest of the API
     location /api/analyst/ {
         proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
@@ -25,12 +28,14 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 90s;
-        # Answers are streamed (Server-Sent Events): pass each chunk straight through.
+        # answers are streamed (Server-Sent Events) so that each chunk must pass straight through
+        # with no buffering
         proxy_buffering off;
         proxy_cache off;
         proxy_set_header Accept-Encoding "";
     }
 
+    # this forwards the rest of the API so that the browser only talks to one address
     location /api/ {
         proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
@@ -41,18 +46,20 @@ server {
         proxy_read_timeout 30s;
     }
 
-    # Scripts and styles are revalidated on every load (a cheap 304 when unchanged):
-    # the ES modules are not versioned, so caching them for longer can mix old and
-    # new modules after a redeploy and break the app. Images and fonts can be cached.
-    # (``expires`` is used instead of add_header so the security headers above are inherited.)
+    # scripts and styles are revalidated on every load (a cheap 304 when unchanged) since the ES
+    # modules are not versioned, so that old and new modules do not mix after a redeploy and break
+    # the app. expires is used instead of add_header so that the security headers above are
+    # inherited
     location ~* \.(css|js)$ {
         expires -1;
     }
 
+    # this caches images for an hour so that repeat visits are faster
     location ~* \.(svg|png|ico|woff2)$ {
         expires 1h;
     }
 
+    # this sends unknown paths to index.html so that the single-page app handles them
     location / {
         expires -1;
         try_files $uri $uri/ /index.html;

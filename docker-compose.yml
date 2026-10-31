@@ -7,10 +7,12 @@
 #   docker compose run --rm api pytest -q tests      # API tests against the live database
 name: coe-forecast
 
+# this is the shared database address so that ml and api always point to the same place
 x-database-url: &database-url
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-coe}:${POSTGRES_PASSWORD:-coe_password}@db:5432/${POSTGRES_DB:-coe}
 
 services:
+  # this is postgres with a named volume so that data survives restarts
   db:
     image: postgres:16-alpine
     environment:
@@ -19,7 +21,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-coe_password}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # this runs the schema on first start so that the tables exist before the app connects
       - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    # this checks postgres is ready so that the other services wait for it
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -27,7 +31,8 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Batch job: ingest -> backtest -> train -> forecast -> write to Postgres, then exit.
+  # this is the batch job: ingest -> backtest -> train -> forecast -> write to Postgres, then exit,
+  # so that it never runs as a long-lived service
   ml:
     build:
       context: .
@@ -42,6 +47,7 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # this is the REST API so that the web app can read forecasts
   api:
     build:
       context: .
@@ -50,7 +56,8 @@ services:
     environment:
       <<: *database-url
       WAIT_THRESHOLD: ${WAIT_THRESHOLD:-0.08}
-      # COE Analyst: put GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env; without a key it runs in basic mode.
+      # COE Analyst: put GROQ_API_KEY (or ANTHROPIC_API_KEY) in .env so that it uses a model,
+      # without a key it runs in basic mode
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANALYST_ENABLED: ${ANALYST_ENABLED:-true}      # false = basic mode (deterministic; used for e2e runs)
@@ -62,6 +69,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # this is nginx with the static site so that port 8080 serves the whole app
   web:
     build:
       context: .
@@ -75,5 +83,6 @@ services:
       - api
     restart: unless-stopped
 
+# this names the database volume so that compose keeps it between runs
 volumes:
   pgdata:

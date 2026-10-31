@@ -24,6 +24,8 @@ from .interventions import identifiable_events, select_and_fit
 from .parallel import parallel_map
 from .training import Windows
 
+# these are the three quantiles the baselines predict so that they are scored the same way as the
+# other models
 BASELINE_QUANTILES = [0.1, 0.5, 0.9]
 
 
@@ -33,6 +35,7 @@ BASELINE_QUANTILES = [0.1, 0.5, 0.9]
 class NaiveForecaster:
     """Last value as the median; empirical h-step changes give the interval."""
 
+    # this learns the usual change over each horizon so that the interval comes from real past moves
     def fit(self, train_panel: pd.DataFrame, horizon: int) -> "NaiveForecaster":
         self.offsets = {}
         for cat, grp in train_panel.sort_values("time_idx").groupby("category"):
@@ -43,6 +46,7 @@ class NaiveForecaster:
             self.offsets[cat][:, 1] = 0.0                               # median = no change
         return self
 
+    # this adds those changes to the latest premium so that the median stays flat like a random walk
     def predict(self, windows: Windows) -> np.ndarray:
         return np.stack([anchor + self.offsets[cat] for anchor, cat in zip(windows.anchor, windows.category)])
 
@@ -68,6 +72,7 @@ class ArimaForecaster:
     def __init__(self, with_interventions: bool):
         self.with_interventions = with_interventions
 
+    # this adds policy dummies only for the Box-Tiao version so that the two ARIMAs can be compared
     def fit(self, train_panel: pd.DataFrame, n_workers: int = 1) -> "ArimaForecaster":
         jobs = []
         for cat, grp in train_panel.sort_values("time_idx").groupby("category"):
@@ -86,10 +91,14 @@ class ArimaForecaster:
         order, res, cols = self.models[cat]
         exog = history[cols].to_numpy(dtype=float) if cols else None
         future_exog = future[cols].to_numpy(dtype=float) if cols else None
+        # this updates the Kalman filter without refitting so that each origin is cheap and only
+        # uses data seen so far
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             updated = res.apply(history["target"].to_numpy(), exog=exog)
             fc = updated.get_forecast(steps=len(future), exog=future_exog)
+        # this turns the mean and error into normal quantiles so that ARIMA gives ranges like the
+        # other models
         mean, se = np.asarray(fc.predicted_mean), np.sqrt(np.asarray(fc.var_pred_mean))
         return np.stack([mean + stats.norm.ppf(q) * se for q in quantiles], axis=-1)
 
@@ -97,6 +106,7 @@ class ArimaForecaster:
 # ---------------------------------------------------------------------------
 # Gradient boosting
 # ---------------------------------------------------------------------------
+# this is how many past premiums go in as lags so that the trees see the last 6 months
 TARGET_LAGS = 12
 
 
@@ -104,9 +114,13 @@ def _gbm_features(windows: Windows) -> tuple[np.ndarray, np.ndarray]:
     """Flatten each (window, horizon) pair into one tabular row."""
     n, H = windows.y.shape
     target_col = ENCODER_FEATURES.index("target")
+    # this makes the history relative to the latest premium so that trees learn changes and not
+    # price levels
     lags = windows.enc[:, -TARGET_LAGS:, target_col] - windows.anchor[:, None]      # relative history
     last_obs = windows.enc[:, -1, :]                                                  # all inputs at origin
     rows, horizons = [], []
+    # this builds one set of rows per horizon so that a tree model can use the same windows as the
+    # networks
     for h in range(H):
         rows.append(np.column_stack([lags, last_obs, windows.dec[:, h, :],
                                      np.full(n, h + 1), windows.static]))
@@ -119,6 +133,8 @@ class GBMForecaster:
 
     def fit(self, train: Windows, seed: int = 0) -> "GBMForecaster":
         X, h = _gbm_features(train)
+        # this trains on the change from the latest premium so that it works the same way as the
+        # anchored TFT
         delta = (train.y - train.anchor[:, None]).T.reshape(-1)          # same horizon-major order as X
         self.models = [
             HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=300, learning_rate=0.05,
@@ -130,6 +146,7 @@ class GBMForecaster:
     def predict(self, windows: Windows) -> np.ndarray:
         X, _ = _gbm_features(windows)
         n, H = len(windows), windows.dec.shape[1]
+        # this reshapes the output to [N, H, Q] so that it matches the other models
         preds = np.stack([m.predict(X) for m in self.models], axis=-1).reshape(H, n, -1).transpose(1, 0, 2)
         preds = np.sort(preds, axis=-1)                       # guard against quantile crossing
         return preds + windows.anchor[:, None, None]

@@ -14,6 +14,7 @@ import {
   outlookPill, pct, provenance, rangeShort, raw, segmented, sgt,
 } from "../util.js";
 
+// these are the four ways in so that each kind of visitor can start from their own goal
 const INTENTS = [
   { icon: "car", href: "#/plan?intent=buy", title: "Buying a car", body: "See the outlook for your category and how your COE budget compares.", go: "Plan my purchase" },
   { icon: "renew", href: "#/plan?intent=renew", title: "Renewing my COE", body: "Estimate the renewal price (PQP) and where it may be heading.", go: "Compare renewal options" },
@@ -21,6 +22,8 @@ const INTENTS = [
   { icon: "chart", href: "#/forecast/A", title: "Exploring the market", body: "Forecasts, supply scenarios and what past policies did to premiums.", go: "View full analytics" },
 ];
 
+// these are the steps of the forecast process so that the how-it-works section can be drawn from
+// data
 const PIPELINE = [
   ["Collect", "Every COE bidding result and quota since 2010, published by LTA on data.gov.sg, plus inflation, interest rates and GDP."],
   ["Model", "Several forecasting methods are trained side by side, including one that measures what past policy changes did to premiums."],
@@ -29,6 +32,7 @@ const PIPELINE = [
   ["Publish", "The latest forecast goes live with its model run, timestamp and data sources attached."],
 ];
 
+// this draws one category card so that the five cards look the same
 function categoryCard(c) {
   const delta = c.change_pct;
   const dir = delta == null || Math.abs(delta) < 0.05 ? "flat" : delta > 0 ? "up" : "down";
@@ -60,12 +64,14 @@ function categoryCard(c) {
     </a>`;
 }
 
+// this draws grey placeholder cards so that the layout does not jump while data loads
 function skeletonCards() {
   return Array.from({ length: 5 }, () => html`<div class="card cat-card"><div class="skeleton" style="height:18px;width:60%"></div>
     <div class="skeleton" style="height:36px;width:80%;margin-top:18px"></div><div class="skeleton" style="height:44px;margin-top:12px"></div>
     <div class="skeleton" style="height:60px;margin-top:12px"></div></div>`);
 }
 
+// this draws the home page and returns a cleanup function so that the router can remove it later
 export async function render(root) {
   mount(root, html`
     <section class="hero container page-enter">
@@ -129,9 +135,9 @@ export async function render(root) {
     </section>`);
 
   const cards = root.querySelector("#cards");
-  // Opening a card: its data is fetched as soon as it is pointed at or focused,
-  // and on click the card's category, premium, forecast and outlook morph into
-  // the same items on the Forecast page (a shared-element transition).
+  // opening a card: its data is fetched as soon as it is pointed at or focused, and on click the
+  // card's category, premium, forecast and outlook morph into the same items on the Forecast page
+  // so that the jump feels connected
   const cardOf = (e) => e.target.closest?.("a.cat-card[data-cat]");
   const warm = (e) => { const card = cardOf(e); if (card) prefetch(card.dataset.cat); };
   cards.addEventListener("pointerover", warm);
@@ -149,6 +155,8 @@ export async function render(root) {
   // ---- the forecast chart: one category at a time, changed in place ----
   let chart = null;
   let chartToken = 0;
+  // this draws one category's fan, the token drops old replies so that a slow response cannot
+  // replace a newer one
   async function drawChart(cat, { animate = false } = {}) {
     const token = ++chartToken;
     const holder = root.querySelector("#home-fan");
@@ -170,7 +178,8 @@ export async function render(root) {
     const points = history.value.points;
     const notice = root.querySelector("#home-notice");
     if (forecast.status !== "fulfilled") {
-      // No forecast (the model has not run, or its service is down): history still works.
+      // no forecast (the model has not run, or its service is down): this keeps the history on
+      // screen so that the chart still works
       const opts = historyOptions({ history: points, name: `Cat ${cat}`, height });
       if (chart) chart.update(opts, { animate, resetZoom: true }); else chart = lineChart(holder, opts);
       sub.textContent = `Cat ${cat}: recorded premiums for the last year.`;
@@ -186,12 +195,14 @@ export async function render(root) {
     if (chart) chart.update(opts, { animate, resetZoom: true }); else chart = drawFan(holder, opts, last);
     mount(root.querySelector("#home-provenance"), provenance({ run: f.run, dataThrough: f.origin.label, id: forecastId(cat, f.steps[0], f.run) }));
   }
+  // this redraws on a category change and fetches on hover so that switching feels instant
   onSegment(root, "home-cat", (c) => drawChart(c, { animate: true }));
   root.querySelector('[data-seg="home-cat"]').addEventListener("pointerover", (e) => {
     const c = e.target.closest("button[data-value]")?.dataset.value;
     if (c) api.prefetch(`/history/${c}?years=1`, `/forecast/${c}?scenario=base`);
   });
 
+  // this loads the market summary so that the cards and header can be filled
   try {
     const summary = await api.get("/summary");
     mount(cards, summary.categories.length ? html`${summary.categories.map(categoryCard)}`
@@ -202,6 +213,7 @@ export async function render(root) {
         <span class="tick" aria-hidden="true">✓</span>`);
     }
     api.prefetch("/categories", "/scenarios");      // small; lets any card open without waiting
+    // this tells the analyst what is on screen so that its answers match the page
     setView({ facts: [
       { label: "Data through", value: summary.data_through?.label || "—" },
       ...summary.categories.filter((c) => c.signal).map((c) => ({ label: c.name, value: `${money(c.latest.premium)} · ${c.signal.label}` })),
@@ -215,6 +227,8 @@ export async function render(root) {
 
   await drawChart("A");
 
+  // this fills the stats and removes the section on failure so that the page never shows empty
+  // numbers
   try {
     const [metrics, events] = await Promise.all([api.get("/model/metrics"), api.get("/policy/events")]);
     const ours = metrics.leaderboard.find((r) => r.model === "hybrid") || metrics.leaderboard[0];

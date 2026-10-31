@@ -28,8 +28,10 @@ export const STEPS = [
     body: "Save the premium you're waiting for. Each target is re-scored after every bidding exercise, and we flag changes the next time you open the app." },
 ];
 
+// this holds the running tour or null so that all functions read the same state
 let state = null;     // { i, spot, card, blocker, onMove, onKey, lastFocus }
 
+// this waits for an element to appear so that the tour can follow a page that is still loading
 function waitFor(selector, timeout = 5000) {
   return new Promise((resolve) => {
     const found = document.querySelector(selector);
@@ -43,6 +45,7 @@ function waitFor(selector, timeout = 5000) {
   });
 }
 
+// this places the spotlight and the card so that the card never covers the target
 function place() {
   if (!state) return;
   const { spot, card, target } = state;
@@ -51,8 +54,8 @@ function place() {
   if (target && target.isConnected) {
     const r = target.getBoundingClientRect();
     const pad = 8;
-    // The first spotlight appears in place; after that it glides from the
-    // previous target to the next (CSS transition), so the eye can follow it.
+    // the first spotlight appears in place, after that it glides from the previous target to the
+    // next (CSS transition) so that the eye can follow it
     const firstPlacement = !state.placed;
     if (firstPlacement) spot.style.transition = "none";
     spot.classList.remove("is-waiting");
@@ -60,6 +63,7 @@ function place() {
       top: `${r.top - pad}px`, left: `${r.left - pad}px`, width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px`,
     });
     if (firstPlacement) { void spot.offsetWidth; spot.style.transition = ""; state.placed = true; }
+    // this uses a bottom sheet on phones so that the card does not cover the page
     if (vw < 600) {
       card.style.cssText = "";
       card.classList.add("tour-card-sheet");
@@ -81,8 +85,8 @@ function place() {
     Object.assign(card.style, { top: `${top}px`, left: `${left}px` });
     card.classList.add("is-placed");                                            // later moves glide
   } else {
-    // Waiting for the next page's target: keep the page dimmed (no flash of the
-    // undimmed page between steps); the ring fades until the target is found.
+    // waiting for the next page's target: this keeps the page dimmed and fades the ring so that
+    // there is no flash of the undimmed page between steps
     spot.classList.add("is-waiting");
     if (!state.placed) Object.assign(spot.style, { top: `${vh / 2}px`, left: `${vw / 2}px`, width: "0px", height: "0px" });
     card.classList.remove("tour-card-sheet");
@@ -91,11 +95,13 @@ function place() {
   }
 }
 
+// this opens a step so that the page, the card and the spotlight change together
 async function show(i) {
   const step = STEPS[i];
   state.i = i;
   const want = buildHash({ page: step.page, category: step.category });
   const now = parseHash(location.hash);
+  // this changes page only when needed so that a step on the same page does not reload it
   if (now.page !== step.page || (step.category && now.category !== step.category)) {
     location.hash = want;
   }
@@ -119,12 +125,14 @@ async function show(i) {
   state.target = null;
   place();
   const target = await waitFor(`[data-anchor="${step.anchor}"]`);
+  // this stops if the user moved on while waiting so that an old step cannot draw over a new one
   if (!state || state.i !== i) return;
   state.target = target;
   state.ro?.disconnect();
   if (target) { state.ro = new ResizeObserver(state.onMove); state.ro.observe(target); }
   if (target) {
-    // Scroll only when the target is not already fully in view (below the sticky header).
+    // this scrolls only when the target is not fully in view (below the sticky header) so that the
+    // page does not jump for no reason
     const r = target.getBoundingClientRect();
     const inView = r.top >= 100 && r.bottom <= window.innerHeight - 8;
     if (!inView) target.scrollIntoView({ block: target.offsetHeight > window.innerHeight * 0.6 ? "start" : "center", behavior: "instant" });
@@ -133,6 +141,7 @@ async function show(i) {
   card.querySelector('[data-tour="next"], [data-tour="finish"]')?.focus({ preventScroll: true });
 }
 
+// this removes everything the tour added so that the page goes back to normal
 export function endTour() {
   if (!state) return;
   store.set(TOUR_SEEN, true);
@@ -143,7 +152,7 @@ export function endTour() {
   const { spot } = state;
   state.blocker.remove();                     // the page is usable at once
   state.card.remove();
-  // The dimming lifts gently instead of snapping off.
+  // this lifts the dimming gently so that it does not snap off
   spot.classList.add("is-leaving");
   if (reducedMotion() || !spot.animate) spot.remove();
   else {
@@ -159,9 +168,11 @@ export function endTour() {
 
 export function isTouring() { return Boolean(state); }
 
+// this builds the spotlight and card so that the tour can run over any page
 export function startTour(step = 1) {
   document.querySelector(".tour-offer")?.remove();
   document.dispatchEvent(new CustomEvent("coe:tour-start"));   // e.g. the analyst panel steps aside
+  // this just moves to the step if a tour is running so that two tours never stack
   if (state) { show(Math.max(0, Math.min(STEPS.length - 1, step - 1))); return; }
   const blocker = document.createElement("div");
   blocker.className = "tour-blocker";
@@ -176,6 +187,7 @@ export function startTour(step = 1) {
   document.body.classList.add("touring");
 
   let frame;
+  // this waits for the next frame so that scrolling does not place the card many times a frame
   const onMove = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
   const onKey = (e) => {
     if (e.key === "Escape") { e.preventDefault(); endTour(); return; }
@@ -189,6 +201,7 @@ export function startTour(step = 1) {
       else if (!card.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
     }
   };
+  // this runs the card buttons so that all actions go through one handler
   card.addEventListener("click", (e) => {
     const action = e.target.closest("[data-tour]")?.dataset.tour;
     if (!action || !state) return;

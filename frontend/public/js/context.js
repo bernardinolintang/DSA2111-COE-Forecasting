@@ -6,10 +6,12 @@
 // * page actions: in-place handlers the current page offers (e.g. setQuota),
 //   so the analyst can change the page without re-rendering it.
 
+// these hold the current view and page actions so that the analyst can read them from anywhere
 let view = { page: "overview" };
 let actions = {};
 const listeners = new Set();
 
+// this returns the current view so that the analyst can send it with a question
 export function getView() { return view; }
 
 /** Replace the view (the router does this on every navigation). */
@@ -25,11 +27,13 @@ export function setView(partial) {
   listeners.forEach((fn) => fn(view));
 }
 
+// this lets the analyst listen to view changes so that its header stays current
 export function onView(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
 
+// these let a page offer in-place actions so that the analyst can change the page with no reload
 export function setPageActions(obj) { actions = obj || {}; }
 export function pageAction(name) { return actions[name]; }
 

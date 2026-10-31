@@ -20,11 +20,13 @@ from app.services.analyst import tools as data_tools
 # ---------------------------------------------------------------------------
 # Fixtures: a tiny fake database
 # ---------------------------------------------------------------------------
+# these are the fake numbers so that the tests can check exact values
 LEVELS = [0.8, 0.85, 0.92, 1.0, 1.08, 1.15, 1.2]
 COLS = ["q05", "q10", "q25", "q50", "q75", "q90", "q95"]
 PREMIUM = {"A": 131_890, "B": 133_000}
 
 
+# this makes fake exercise dates so that history rows look real
 def _months(n):
     out, y, m = [], 2024, 10
     for _ in range(n):
@@ -35,6 +37,7 @@ def _months(n):
     return out
 
 
+# this makes fake forecast rows so that each scenario has its own path
 def _steps(cat, scenario="base"):
     mult = {"base": 1.0, "quota_plus_20": 0.95, "quota_minus_20": 1.05}.get(scenario, 1.0)
     rows = []
@@ -46,6 +49,7 @@ def _steps(cat, scenario="base"):
     return rows
 
 
+# this swaps the repository for fake data so that the tests need no database
 @pytest.fixture
 def fake_db(monkeypatch):
     run = {"id": 7, "created_at": datetime(2026, 9, 29, tzinfo=timezone.utc),
@@ -96,10 +100,12 @@ def fake_db(monkeypatch):
     return run
 
 
+# these are the allowed outlook labels so that tests can check the wording
 LABELS = ("Downward pressure", "Slight downward pressure", "No clear direction", "Slight upward pressure",
           "Upward pressure")
 
 
+# this builds a context for a page so that tests only state what differs
 def _ctx(page="overview", category=None, scenario="base", bid=None, client_id="c1", quota_pct=None):
     view = context.View(page=page, category=category, scenario=scenario, bid=bid, quota_pct=quota_pct)
     return context.build(None, view, client_id)
@@ -108,6 +114,7 @@ def _ctx(page="overview", category=None, scenario="base", bid=None, client_id="c
 # ---------------------------------------------------------------------------
 # Context
 # ---------------------------------------------------------------------------
+# this checks the prompt data is real so that every number can be traced to the database
 def test_context_contains_every_category_with_real_numbers(fake_db):
     ctx = _ctx()
     cats = {c["code"]: c for c in ctx.app_data["categories"]}
@@ -120,6 +127,7 @@ def test_context_contains_every_category_with_real_numbers(fake_db):
     assert ctx.app_data["policy_events"][0]["estimated_effects"][0]["significant"] is False
 
 
+# this checks the view follows the page so that the analyst talks about what is on screen
 def test_current_view_reflects_page_category_scenario_and_bid(fake_db):
     ctx = _ctx(page="scenario", category="A", scenario="quota_plus_20")
     focus = ctx.current_view["focus"]
@@ -143,6 +151,7 @@ def test_current_view_reflects_page_category_scenario_and_bid(fake_db):
     assert bid["bid"] == 140_000 and 50 < bid["win_probability_pct"] < 100
 
 
+# this checks the watchlist and source line so that the analyst can cite them
 def test_watchlist_is_in_the_view_and_provenance_names_the_data(fake_db):
     ctx = _ctx(page="forecast", category="A")
     assert ctx.current_view["watchlist"][0]["target"] == 120_000
@@ -153,6 +162,7 @@ def test_watchlist_is_in_the_view_and_provenance_names_the_data(fake_db):
 # ---------------------------------------------------------------------------
 # Action whitelist
 # ---------------------------------------------------------------------------
+# this checks navigation is cleaned up so that odd input still gives a valid page
 def test_navigation_actions_are_validated_and_normalised():
     a = actions.validate("navigate", {"page": "bid", "category": "a", "bid": 125000.4})
     assert a.as_dict() == {"type": "navigate", "params": {"page": "bid", "category": "A", "bid": 125000},
@@ -167,6 +177,7 @@ def test_navigation_actions_are_validated_and_normalised():
         assert actions.validate("navigate", {"page": page}).params["page"] == page
 
 
+# this checks supply what-ifs go to the Scenario Lab so that the slider is on screen
 def test_supply_scenarios_open_the_scenario_lab():
     a = actions.validate("navigate", {"page": "forecast", "category": "B", "scenario": "quota_plus_10"})
     assert a.params == {"page": "scenario", "category": "B", "scenario": "quota_plus_10"}
@@ -180,6 +191,7 @@ def test_supply_scenarios_open_the_scenario_lab():
             actions.validate("set_supply_scenario", bad)
 
 
+# this checks watchlist changes need Confirm so that nothing saves by itself
 def test_persistent_actions_require_confirmation():
     watch = actions.validate("prepare_watch", {"category": "A", "direction": "below", "target": 110_000})
     assert watch.confirm is True and watch.summary == "Watch Cat A below $110,000"
@@ -195,6 +207,7 @@ def test_persistent_actions_require_confirmation():
 # ---------------------------------------------------------------------------
 # Basic (offline) mode
 # ---------------------------------------------------------------------------
+# these are the phrases to test so that basic mode handles normal wording
 @pytest.mark.parametrize("question, page, category", [
     ("Show me Cat E.", "forecast", "E"),
     ("Take me to the bid planner for Cat A", "bid", "A"),
@@ -204,12 +217,14 @@ def test_persistent_actions_require_confirmation():
     ("open my plan", "plan", None),
     ("show me the data sources", "learn", None),
 ])
+# this checks each phrase opens the right page so that navigation works with no model
 def test_offline_navigation(fake_db, question, page, category):
     reply, acts = offline.answer(question, _ctx(), None)
     assert acts and acts[0].type == "navigate" and acts[0].params["page"] == page
     assert acts[0].params.get("category") == category
 
 
+# this checks alerts are only drafts so that basic mode cannot save by itself
 def test_offline_alert_is_only_a_draft(fake_db):
     reply, acts = offline.answer("Alert me when Cat A falls below $110k", _ctx(), None)
     assert acts[0].type == "prepare_watch" and acts[0].confirm
@@ -217,6 +232,7 @@ def test_offline_alert_is_only_a_draft(fake_db):
     assert "Confirm" in reply and "created" not in reply.lower()
 
 
+# this checks the bid comes from the forecast so that basic mode never makes up a number
 def test_offline_bid_for_probability_uses_the_forecast(fake_db):
     ctx = _ctx(page="bid", category="A")
     reply, acts = offline.answer("How much should I bid if I want a 90% chance?", ctx, None)
@@ -225,6 +241,7 @@ def test_offline_bid_for_probability_uses_the_forecast(fake_db):
     assert acts[0].type == "set_bid_amount" and acts[0].params["amount"] == expected
 
 
+# this checks the explain answers so that outlooks and terms work with no model
 def test_offline_explains_recommendation_and_terms(fake_db):
     reply, _ = offline.answer("Why is Cat A showing no clear direction?", _ctx(), None)
     assert "Cat A shows" in reply and "8%" in reply and "55%" in reply
@@ -239,6 +256,7 @@ def test_offline_explains_recommendation_and_terms(fake_db):
     assert reply.startswith("80% range")
 
 
+# this checks the policy and scenario answers so that they use real effects
 def test_offline_biggest_policy_effect_and_scenarios(fake_db):
     reply, acts = offline.answer("What changed Cat B prices the most historically?", _ctx(), None)
     assert "MAS car-loan curbs" in reply and "not statistically significant" in reply
@@ -252,6 +270,7 @@ def test_offline_biggest_policy_effect_and_scenarios(fake_db):
     assert offline.detect_quota_pct("supply up 45%") is None                     # outside the modelled range
 
 
+# this checks the fallback message so that basic mode is honest about its limits
 def test_offline_admits_what_it_cannot_do(fake_db):
     reply, acts = offline.answer("Write me a poem about durians", _ctx(), None)
     assert "basic mode" in reply and not acts
@@ -260,14 +279,17 @@ def test_offline_admits_what_it_cannot_do(fake_db):
 # ---------------------------------------------------------------------------
 # Claude loop with a scripted fake client
 # ---------------------------------------------------------------------------
+# this fakes a text block so that the tests can script a reply
 def _text(t):
     return SimpleNamespace(type="text", text=t)
 
 
+# this fakes a tool call so that the tests can script a tool request
 def _tool(name, args, tid="tu_1"):
     return SimpleNamespace(type="tool_use", name=name, input=args, id=tid)
 
 
+# this replays scripted replies so that the loop can run with no real API
 class FakeClient:
     def __init__(self, *responses):
         self.responses = list(responses)
@@ -282,15 +304,18 @@ class FakeClient:
         return item
 
 
+# this fakes one API response so that scripts stay short
 def _resp(stop, *blocks):
     return SimpleNamespace(stop_reason=stop, content=list(blocks))
 
 
+# this runs the loop on a script so that the tests below stay short
 def _run(client, question="q", alerts=None, tool=None):
     return llm.answer([], question, {"categories": []}, {"page": "Forecast"},
                       tool or (lambda name, params: {"ok": True, "name": name}), alerts or {}, client=client)
 
 
+# this checks the request shape so that caching and the fallback stay turned on
 def test_llm_request_shape_caching_and_fallback():
     client = FakeClient(_resp("end_turn", _text("Hello")))
     reply, acts, used = _run(client)
@@ -304,6 +329,7 @@ def test_llm_request_shape_caching_and_fallback():
     assert {t["name"] for t in call["tools"]} >= {"navigate", "prepare_watch", "bid_win_probability"}
 
 
+# this checks data tools run here so that the model gets real numbers
 def test_llm_runs_data_tools_and_returns_their_numbers():
     seen = []
     client = FakeClient(
@@ -317,6 +343,7 @@ def test_llm_runs_data_tools_and_returns_their_numbers():
     assert result["type"] == "tool_result" and json.loads(result["content"]) == {"bid": 141860}
 
 
+# this checks a UI action with text ends the loop so that no extra request is paid for
 def test_llm_ui_action_with_text_needs_no_second_call():
     client = FakeClient(_resp("tool_use", _text("Opening Cat E's forecast."),
                               _tool("navigate", {"page": "forecast", "category": "E"})))
@@ -325,6 +352,7 @@ def test_llm_ui_action_with_text_needs_no_second_call():
     assert reply == "Opening Cat E's forecast." and acts[0].params == {"page": "forecast", "category": "E"}
 
 
+# this checks a bad action goes back to the model so that it never reaches the browser
 def test_llm_invalid_action_is_rejected_and_reported_back():
     client = FakeClient(
         _resp("tool_use", _tool("navigate", {"page": "forecast", "category": "Z"})),
@@ -336,6 +364,7 @@ def test_llm_invalid_action_is_rejected_and_reported_back():
     assert result["is_error"] is True and "Unknown category" in result["content"]
 
 
+# this checks watchlist tools stay drafts so that the model cannot claim it saved something
 def test_llm_watchlist_changes_are_drafts_needing_confirmation():
     client = FakeClient(
         _resp("tool_use", _tool("prepare_watch", {"category": "A", "direction": "below", "target": 110000})),
@@ -346,6 +375,7 @@ def test_llm_watchlist_changes_are_drafts_needing_confirmation():
     assert "Confirm" in client.calls[1]["messages"][-1]["content"][0]["content"]
 
 
+# this checks API errors become AnalystUnavailable so that the router can fall back
 def test_llm_refusal_and_api_errors_raise_unavailable():
     with pytest.raises(llm.AnalystUnavailable):
         _run(FakeClient(_resp("refusal")))
@@ -356,6 +386,7 @@ def test_llm_refusal_and_api_errors_raise_unavailable():
         _run(FakeClient(timeout))
 
 
+# this checks repeats are removed so that the browser does not run one action twice
 def test_llm_repeated_actions_are_deduplicated():
     nav = {"page": "bid", "category": "A"}
     client = FakeClient(
@@ -373,6 +404,7 @@ from app import config as app_config
 from app.services.analyst import groq_llm
 
 
+# this fakes one stream chunk so that tests can replay a Groq reply
 def _chunk(content=None, calls=None):
     delta = SimpleNamespace(content=content, tool_calls=[
         SimpleNamespace(index=i, id=cid, function=SimpleNamespace(name=name, arguments=args))
@@ -380,6 +412,7 @@ def _chunk(content=None, calls=None):
     return SimpleNamespace(choices=[SimpleNamespace(delta=delta, finish_reason=None)])
 
 
+# this replays scripted chunks so that the loop can run with no real API
 class FakeGroq:
     def __init__(self, *turns):
         self.turns = list(turns)
@@ -394,11 +427,13 @@ class FakeGroq:
         return iter(turn)
 
 
+# this runs the loop on a script so that the tests below stay short
 def _groq(client, tool=None, alerts=None):
     return list(groq_llm.stream([], "q", {"categories": [], "policy_events": [], "supply_scenarios": []},
                                 {"page": "Forecast"}, tool or (lambda n, p: {"ok": n}), alerts or {}, client=client))
 
 
+# this checks text streams and the request stays small so that it fits Groq's free limit
 def test_groq_streams_text_and_sends_a_compact_request():
     client = FakeGroq([_chunk("Cat A shows "), _chunk("no clear direction.")])
     events = _groq(client)
@@ -411,6 +446,7 @@ def test_groq_streams_text_and_sends_a_compact_request():
     assert call["messages"][-1]["content"].startswith("CURRENT VIEW")
 
 
+# this checks split arguments are joined so that tool calls survive streaming
 def test_groq_runs_data_tools_with_arguments_split_across_chunks():
     seen = []
     client = FakeGroq(
@@ -430,6 +466,7 @@ def test_groq_runs_data_tools_with_arguments_split_across_chunks():
     assert "omitted here to save tokens" in client.calls[1]["messages"][0]["content"]
 
 
+# this checks a UI action with text ends the loop so that no extra request is used
 def test_groq_ui_actions_are_validated_and_need_no_second_call():
     client = FakeGroq([_chunk("Opening Cat E's forecast."),
                        _chunk(calls=[(0, "c1", "navigate", '{"page": "forecast", "category": "E"}')])])
@@ -439,6 +476,7 @@ def test_groq_ui_actions_are_validated_and_need_no_second_call():
     assert action.params == {"page": "forecast", "category": "E"} and not action.confirm
 
 
+# this checks bad arguments go back to the model so that they never run
 def test_groq_bad_arguments_are_reported_back_not_executed():
     client = FakeGroq([_chunk(calls=[(0, "c1", "prepare_watch", '{"category": "Z", "direction": "below", "target": 1}'),
                                      (1, "c2", "navigate", "not json")])],
@@ -449,6 +487,7 @@ def test_groq_bad_arguments_are_reported_back_not_executed():
     assert results[0].startswith("Error: Unknown category") and results[1].startswith("Error:")
 
 
+# this checks a rate limit becomes AnalystUnavailable so that the router can fall back
 def test_groq_rate_limit_raises_unavailable():
     import groq
 
@@ -456,6 +495,7 @@ def test_groq_rate_limit_raises_unavailable():
         _groq(FakeGroq(groq.RateLimitError.__new__(groq.RateLimitError)))
 
 
+# this lists env and expected provider so that the choice logic is covered
 @pytest.mark.parametrize("env, provider", [
     ({}, "offline"),
     ({"GROQ_API_KEY": "gsk_x"}, "groq"),
@@ -465,6 +505,7 @@ def test_groq_rate_limit_raises_unavailable():
     ({"ANALYST_PROVIDER": "groq"}, "offline"),                      # asked for Groq but no key
     ({"GROQ_API_KEY": "gsk_x", "ANALYST_ENABLED": "false"}, "offline"),
 ])
+# this checks the provider follows the keys so that setting one key is enough
 def test_provider_is_picked_from_the_key_in_env(monkeypatch, env, provider):
     for k in ("GROQ_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANALYST_PROVIDER", "ANALYST_ENABLED"):
         monkeypatch.delenv(k, raising=False)
@@ -473,6 +514,7 @@ def test_provider_is_picked_from_the_key_in_env(monkeypatch, env, provider):
     assert app_config.analyst_provider() == provider
 
 
+# this checks compact data still has the numbers so that shrinking it loses no facts
 def test_compact_app_data_keeps_every_number(fake_db):
     full = _ctx().app_data
     small = context.compact(full)
@@ -482,6 +524,7 @@ def test_compact_app_data_keeps_every_number(fake_db):
     assert loans["effects"] == [["B", -38.2, -60.0, 5.0, 0.12, False]]
 
 
+# this checks detail stays on the category in view so that the prompt stays small
 def test_compact_focuses_on_the_category_in_view(fake_db):
     full = _ctx().app_data
     small = context.compact(full, focus="B")

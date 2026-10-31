@@ -13,12 +13,15 @@ from __future__ import annotations
 
 from bisect import bisect_left
 
+# these are the seven stored levels and their columns so that both lists stay in the same order
 LEVELS = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
 COLUMNS = ["q05", "q10", "q25", "q50", "q75", "q90", "q95"]
 
 
 def _knots(values: list[float]) -> tuple[list[float], list[float]]:
     """Quantile values plus linear tail extensions down to p=0 and up to p=1."""
+    # this extends the outer segments to p=0 and p=1, never below 0 dollars, so that the curve
+    # covers every bid
     xs = list(values)
     lo_slope = (xs[1] - xs[0]) / (LEVELS[1] - LEVELS[0]) or 1.0
     hi_slope = (xs[-1] - xs[-2]) / (LEVELS[-1] - LEVELS[-2]) or 1.0
@@ -30,11 +33,14 @@ def _knots(values: list[float]) -> tuple[list[float], list[float]]:
 def cdf(values: list[float], x: float) -> float:
     """P(premium <= x) for a forecast given by its quantile ``values``."""
     xs, ps = _knots(values)
+    # this handles bids outside the range first so that the search below always finds a segment
     if x <= xs[0]:
         return 0.0
     if x >= xs[-1]:
         return 1.0
+    # this finds the segment that holds x so that we can draw a straight line between its two ends
     i = bisect_left(xs, x)
+    # this guards equal points so that we never divide by zero
     if xs[i] == xs[i - 1]:
         return ps[i]
     frac = (x - xs[i - 1]) / (xs[i] - xs[i - 1])
@@ -44,6 +50,7 @@ def cdf(values: list[float], x: float) -> float:
 def quantile(values: list[float], p: float) -> float:
     """Inverse of :func:`cdf`: the premium at probability level ``p``."""
     xs, ps = _knots(values)
+    # this clamps p into 0 to 1 and finds its segment so that any input gives a valid premium
     p = min(max(p, 0.0), 1.0)
     i = min(max(bisect_left(ps, p), 1), len(ps) - 1)
     frac = (p - ps[i - 1]) / (ps[i] - ps[i - 1])

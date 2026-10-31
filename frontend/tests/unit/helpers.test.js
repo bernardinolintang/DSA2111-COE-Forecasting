@@ -10,6 +10,7 @@ import { buildHash, clampQuota, parseHash, scenarioPct } from "../../public/js/r
 import { STEPS } from "../../public/js/tour.js";
 import { money, moneyShort, number, parseMoney, pct } from "../../public/js/util.js";
 
+// this checks the formats people type so that normal input is accepted
 test("parseMoney accepts sensible currency formats and normalises them", () => {
   for (const [input, value] of [["100000", 100000], ["100,000", 100000], ["$100,000", 100000], ["$ 95,000.00", 95000],
                                 ["S$95,000", 95000], ["95k", 95000], ["12.5K", 12500], [" 88000 ", 88000]]) {
@@ -17,6 +18,7 @@ test("parseMoney accepts sensible currency formats and normalises them", () => {
   }
 });
 
+// this checks bad input so that it gets rejected with a message
 test("parseMoney rejects letters, NaN, negatives, zero, blanks and out-of-range values", () => {
   for (const input of ["d", "abc", "NaN", "-200", "0", "", "   ", "1,00,000", "12..5", "$", "1e5", "1000000", null, undefined]) {
     const r = parseMoney(input);
@@ -27,6 +29,7 @@ test("parseMoney rejects letters, NaN, negatives, zero, blanks and out-of-range 
   assert.equal(parseMoney("-200").error, "Enter a COE premium above $0.");
 });
 
+// this checks missing numbers so that the page never shows NaN
 test("number formatting never shows NaN, undefined or Infinity", () => {
   for (const bad of [NaN, undefined, null, Infinity, -Infinity, "12"]) {
     assert.equal(money(bad), "—");
@@ -38,6 +41,7 @@ test("number formatting never shows NaN, undefined or Infinity", () => {
   assert.equal(moneyShort(131890), "$132k");
 });
 
+// this checks hash routes both ways so that links survive a round trip
 test("hash routes round-trip with categories and query parameters", () => {
   assert.deepEqual(parseHash("#/forecast/A?scenario=quota_plus_10"),
     { path: "forecast/A", page: "forecast", category: "A", query: { scenario: "quota_plus_10" } });
@@ -51,6 +55,7 @@ test("hash routes round-trip with categories and query parameters", () => {
   assert.deepEqual(parseHash(h).query, { event: "quota_injection_2025" });
 });
 
+// this checks special routes so that old links still reach the right place
 test("supply what-ifs route to the Scenario Lab; Learn sections live in the path", () => {
   assert.equal(buildHash({ page: "scenario", category: "A", quota: 12 }), "#/scenario/A?quota=12");
   assert.equal(buildHash({ page: "scenario", category: "A", quota: 0 }), "#/scenario/A");
@@ -65,6 +70,7 @@ test("supply what-ifs route to the Scenario Lab; Learn sections live in the path
   assert.equal(parseHash("#/scenario/C?quota=-10").category, "C");
 });
 
+// this checks policy sentences so that they read like plain English
 test("policy effects read as plain English, including non-significance", () => {
   assert.equal(plainEffect({ category: "A", pct_effect: -10.8, significant: false }, "step"),
     "The model estimates Cat A premiums were about 10.8% lower after this change, but that is within normal price swings, so it may not be a real effect.");
@@ -73,11 +79,13 @@ test("policy effects read as plain English, including non-significance", () => {
   assert.match(plainEffect({ category: "E", pct_effect: -0.1, significant: false }, "step"), /essentially no change/);
 });
 
+// this checks escaping so that a reply cannot inject HTML
 test("analyst replies are escaped before formatting", () => {
   assert.equal(formatReply("Hi **there**\n\n- one\n- two"), "<p>Hi <strong>there</strong></p><ul><li>one</li><li>two</li></ul>");
   assert.equal(formatReply("<img src=x onerror=alert(1)>"), "<p>&lt;img src=x onerror=alert(1)&gt;</p>");
 });
 
+// this checks the tour data so that no step is missing a part
 test("the tour has seven steps, each with a page, an anchor and copy", () => {
   assert.equal(STEPS.length, 7);
   assert.deepEqual(STEPS.map((s) => s.page), ["overview", "forecast", "scenario", "bid", "policy", "model", "alerts"]);

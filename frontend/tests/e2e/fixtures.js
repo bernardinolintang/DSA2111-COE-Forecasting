@@ -3,6 +3,7 @@
 
 import { test as base, expect } from "@playwright/test";
 
+// this extends the base test so that each test fails on console errors and skips the tour offer
 export const test = base.extend({
   tourSeen: [true, { option: true }],
   problems: async ({}, use) => { await use([]); },
@@ -19,6 +20,7 @@ export const test = base.extend({
 export { expect };
 
 /** Wait until the router has rendered the page and its main data. */
+// this waits for the home data so that tests start once the app has loaded
 export async function ready(page) {
   await page.waitForFunction(() => !document.querySelector("#app [aria-busy='true']"));
 }

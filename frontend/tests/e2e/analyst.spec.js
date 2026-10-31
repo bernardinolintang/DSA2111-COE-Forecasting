@@ -6,12 +6,14 @@
 
 import { expect, test } from "./fixtures.js";
 
+// this types a question and sends it so that the tests below stay short
 async function ask(page, question) {
   if (!(await page.locator("#analyst").isVisible())) await page.locator("#ask-compass").click();
   await page.locator("#analyst-input").fill(question);
   await page.locator("#analyst-input").press("Enter");
 }
 
+// this fakes the analyst reply so that action tests do not depend on wording
 function mockReply(page, body, capture) {
   return page.route("**/api/analyst/chat*", async (route) => {
     capture?.push(route.request().postDataJSON());
@@ -19,6 +21,7 @@ function mockReply(page, body, capture) {
   });
 }
 
+// this checks what the browser sends so that the server knows what the viewer is looking at
 test("the request carries the page, category, quota change and bid being viewed", async ({ page }) => {
   const sent = [];
   await mockReply(page, { reply: "ok" }, sent);
@@ -51,6 +54,7 @@ test("the request carries the page, category, quota change and bid being viewed"
   expect(sent[2].view).toEqual({ page: "learn" });
 });
 
+// this checks real navigation answers so that "show me" requests open the right page
 test("navigation requests open the right page (real backend)", async ({ page }) => {
   await page.goto("/");
   await ask(page, "Show me Cat E");
@@ -66,6 +70,7 @@ test("navigation requests open the right page (real backend)", async ({ page }) 
   await expect(page).toHaveURL(/#\/policy\/B\?event=/);
 });
 
+// this checks actions update the page in place so that the viewer keeps their place
 test("scenario and bid actions change the page in place", async ({ page }) => {
   await page.goto("/#/scenario/A");
   await expect(page.locator("#lab-median")).not.toHaveText("—");
@@ -93,6 +98,7 @@ test("scenario and bid actions change the page in place", async ({ page }) => {
   await expect(page.locator("#bid-input")).toHaveValue("140,000");
 });
 
+// this checks a supply question from elsewhere so that it lands on the slider at the right value
 test("a supply question from another page opens the Scenario Lab at that level", async ({ page }) => {
   await mockReply(page, { reply: "Opening the Scenario Lab.",
     actions: [{ type: "set_supply_scenario", params: { quota_pct: 15, category: "B" }, confirm: false, summary: "Supply scenario: +15% supply" }] });
@@ -103,6 +109,7 @@ test("a supply question from another page opens the Scenario Lab at that level",
   await expect(page.locator("#quota-out")).toHaveText("+15%");
 });
 
+// this checks the same flow on the real backend so that the mock does not hide a problem
 test("supply what-ifs through the real backend land in the Scenario Lab", async ({ page, request }) => {
   const status = await (await request.get("/api/analyst/status")).json();
   test.skip(status.mode !== "offline", "deterministic wording is only guaranteed in basic mode");
@@ -113,6 +120,7 @@ test("supply what-ifs through the real backend land in the Scenario Lab", async 
   await expect(page.locator(".msg-bot .provenance").last()).toContainText("bidding exercise");
 });
 
+// this checks the wording so that the analyst never gives a buy or wait call
 test("Compass does not tell anyone to buy or to wait (real backend, basic mode)", async ({ page, request }) => {
   const status = await (await request.get("/api/analyst/status")).json();
   test.skip(status.mode !== "offline", "deterministic wording is only guaranteed in basic mode");
@@ -124,6 +132,7 @@ test("Compass does not tell anyone to buy or to wait (real backend, basic mode)"
   await expect(reply).toContainText("Cat A shows");
 });
 
+// this checks a target stays a draft so that nothing saves until Confirm is pressed
 test("watchlist changes are only drafted until the user confirms (real backend)", async ({ page, request }) => {
   await page.goto("/#/alerts");
   await ask(page, "Alert me when Cat A falls below $110k");
@@ -140,6 +149,7 @@ test("watchlist changes are only drafted until the user confirms (real backend)"
   for (const a of saved) await request.delete(`/api/alerts/${a.id}?client_id=${cid}`);
 });
 
+// this checks Cancel so that a dropped draft leaves the list unchanged
 test("cancelling a drafted watch saves nothing", async ({ page, request }) => {
   await page.goto("/");
   await ask(page, "watch Cat B above $150,000");
@@ -149,6 +159,7 @@ test("cancelling a drafted watch saves nothing", async ({ page, request }) => {
   expect(await (await request.get(`/api/alerts?client_id=${cid}`)).json()).toEqual([]);
 });
 
+// this breaks the analyst on purpose so that we know the rest of the app still works
 test("if Compass is down, the panel says so and the app keeps working", async ({ page, problems }) => {
   await page.route("**/api/analyst/chat*", (route) => route.abort("failed"));
   await page.goto("/#/forecast/A");
@@ -168,6 +179,7 @@ test("if Compass is down, the panel says so and the app keeps working", async ({
   await expect(page.locator(".msg-bot.is-error").last()).toContainText("Internal error");
 });
 
+// this checks the popover with no AI so that terms are still explained in basic mode
 test("explain popover works without the AI and can hand over to Compass", async ({ page }) => {
   const sent = [];
   await mockReply(page, { reply: "Here's what the 80% range means for Cat A." }, sent);
@@ -182,6 +194,7 @@ test("explain popover works without the AI and can hand over to Compass", async 
   expect(sent[0].messages.at(-1).content).toContain("80% range");
 });
 
+// this checks the explain buttons on the outlook so that the hard terms can be read in place
 test("the outlook and uncertainty are explained in place", async ({ page }) => {
   await page.goto("/#/forecast/A");
   await page.locator("#advice").getByRole("button", { name: "Explain: market outlook" }).click();
@@ -192,6 +205,7 @@ test("the outlook and uncertainty are explained in place", async ({ page }) => {
   await expect(pop).toContainText("How wide the forecast's 80% range is");
 });
 
+// this checks the thinking state and real streaming so that there is no fake typewriter effect
 test("shows a thinking state, then the answer as it arrives (no typewriter)", async ({ page }) => {
   const long = "The model's median for Cat A is flat, so no clear direction is the honest reading. ".repeat(12).trim();
   await page.route("**/api/analyst/chat*", async (route) => {
@@ -217,6 +231,7 @@ test("shows a thinking state, then the answer as it arrives (no typewriter)", as
   await expect(page.locator(".analyst-send")).toBeEnabled();
 });
 
+// this checks the event stream so that the real backend streams as expected
 test("the real backend streams the answer as server-sent events", async ({ page }) => {
   await page.goto("/#/forecast/A");
   const [res] = await Promise.all([
@@ -227,6 +242,7 @@ test("the real backend streams the answer as server-sent events", async ({ page 
   await expect(page.locator(".msg-bot .provenance").last()).toContainText("Cat A forecast");
 });
 
+// this checks the panel closes for the tour so that it does not cover the spotlight
 test("starting the tour moves Ask Compass out of the way", async ({ page }) => {
   await page.goto("/");
   await page.locator("#ask-compass").click();

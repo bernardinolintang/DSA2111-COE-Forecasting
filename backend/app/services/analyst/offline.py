@@ -22,12 +22,15 @@ from .context import AnalystContext
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
+# these patterns pick out categories, money and percents so that free text can be understood without
+# a model
 _CAT = re.compile(r"\bcat(?:egory)?\s*[-.]?\s*([a-e])\b", re.I)
 _MONEY = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(k|thousand|m|mil|million)?\b(?!\s*%)", re.I)
 _PCT = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*(?:%|percent)", re.I)
 _UP = r"\+|plus|more|increases?|higher|rises?|up|raised?"
 _DOWN = r"-|minus|less|fewer|decreases?|cuts?|lower|drops?|falls?|down|reduced?"
 
+# this maps words to pages so that "open the planner" goes to the right place
 PAGE_WORDS = [
     ("bid", r"\bbid(?:ding)?\s*planner\b|\bplanner\b|\bbid page\b"),
     ("scenario", r"\bscenario lab\b|\bscenarios?\b|\bsupply slider\b"),
@@ -39,8 +42,11 @@ PAGE_WORDS = [
     ("overview", r"\boverview\b|\bhome\b|\bdashboard\b"),
     ("forecast", r"\bforecasts?\b|\bpredictions?\b|\bchart\b"),
 ]
+# this spots requests to go somewhere so that a plain question does not move the page
 NAV_VERB = re.compile(r"\b(show|open|take me|go to|go back|navigate|switch|bring me|view|see|display|jump)\b", re.I)
 
+# this maps words to glossary entries, specific ones first so that "80%" wins over a general word
+# like "range"
 GLOSSARY_KEYS = [
     ("range-80", r"80\s*%|80 percent|p10|p90"),
     ("range-50", r"50\s*%\s*range|50 percent range|p25|p75"),
@@ -77,6 +83,7 @@ GLOSSARY_KEYS = [
     ("coe", r"\bcoe\b"),
 ]
 
+# this is a short intro per page so that "explain this page" works with no model
 PAGE_INTRO = {
     "overview": "The Overview shows today's premium for each of the five COE categories, how it moved since the "
                 "last exercise, the forecast for the next exercise and the market outlook for the next quota quarter.",
@@ -104,6 +111,7 @@ PAGE_INTRO = {
 }
 
 
+# this formats dollars so that replies look the same everywhere
 def _money(v) -> str:
     return f"${v:,.0f}"
 
@@ -127,6 +135,7 @@ def parse_amount(text: str) -> int | None:
     return None
 
 
+# this finds the category in the text so that "cat a" and "category A" both work
 def detect_category(text: str) -> str | None:
     m = _CAT.search(text)
     return m.group(1).upper() if m else None
@@ -149,6 +158,7 @@ def detect_quota_pct(text: str) -> int | None:
     return size if re.fullmatch(_UP, word) else -size
 
 
+# this finds the first page named in the text so that navigation requests work
 def detect_page(text: str) -> str | None:
     for page, pattern in PAGE_WORDS:
         if re.search(pattern, text, re.I):
@@ -166,19 +176,23 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
     cat = detect_category(q) or view.category
     alerts = {a["id"]: a for a in ctx.alerts}
 
+    # this validates through the same whitelist as the LLM path so that basic mode cannot do
+    # anything extra
     def act(name, **params) -> Action:
         return validate(name, params, alerts)
 
+    # this stops here when no forecast exists so that no number gets made up
     if not ctx.available:
         return ("There are no forecasts yet – the model hasn't finished its first run, so I can't quote any "
                 "numbers. Try again once the Overview shows data."), []
 
     try:
-        # 1. Tour / help
+        # 1. tour and help, this comes first so that "how do i use this" does not hit a later rule
         if re.search(r"\b(tour|tutorial|walk ?through|onboarding|how do i use)\b", ql):
             return "Starting the 2-minute tour – use Next and Back to move through it.", [act("open_tutorial", step=1)]
 
-        # 2. Watchlist drafts ("alert me when Cat A falls below $110k")
+        # 2. watchlist drafts ("alert me when Cat A falls below $110k") so that a target can be set
+        # up by chat
         if re.search(r"\b(alert|notify|tell me|let me know|watch|remind)\b", ql) and \
                 re.search(r"\b(below|under|less than|drops?|falls?|cheaper|above|over|more than|exceeds?|rises?|goes up)\b", ql):
             target = parse_amount(q)
@@ -197,7 +211,7 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                     f"(there are no emails or push messages)."), [act("prepare_watch", category=cat,
                                                                        direction=direction, target=target)]
 
-        # 3. "How much should I bid for a 90% chance?"
+        # 3. "how much should I bid for a 90% chance?" so that the bid comes from the forecast
         if re.search(r"\bbid\b", ql) and re.search(r"how much|what should|what bid|how high|need to bid", ql):
             if not cat:
                 return "Which category are you bidding in (A–E)?", []
@@ -217,7 +231,7 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                     f"Everyone who wins pays the same premium, so a higher bid only buys certainty."
                     ), [_bid_action(view, cat, sug["90%_chance"])]
 
-        # 4. "What's my chance if I bid $130k?"
+        # 4. "what's my chance if I bid $130k?" so that the odds come from the forecast
         amount = parse_amount(q)
         if amount and re.search(r"\b(chance|odds|probability|win)\b", ql) and re.search(r"\bbid", ql):
             if not cat:
@@ -226,7 +240,7 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
             return (f"A {_money(amount)} bid has an estimated {r['win_probability_pct']:.0f}% chance of winning "
                     f"Cat {cat} in the {r['exercise']} exercise (model forecast)."), [_bid_action(view, cat, amount)]
 
-        # 5. Supply scenario
+        # 5. supply scenario so that what-ifs work in basic mode
         pct = detect_quota_pct(q)
         if pct is not None and (re.search(r"scenario|supply|quota", ql) or NAV_VERB.search(ql)):
             target_cat = cat or "A"
@@ -238,12 +252,13 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                     f"{_money(end['p90'])}), and the outlook is '{r['outlook']['label']}'."
                     ), [act("set_supply_scenario", quota_pct=pct, category=target_cat)]
 
-        # 6. Biggest policy impact
+        # 6. biggest policy impact so that the top effect can be quoted
         if re.search(r"(biggest|largest|most|strongest).*(impact|effect|change|moved|affect)|"
                      r"(impact|effect).*(most|biggest|largest)|what changed", ql):
             return _biggest_policy(ctx, cat or "B")
 
-        # 7. Navigation ("show me Cat E", "take me to the bid planner for Cat A")
+        # 7. navigation ("show me Cat E", "take me to the bid planner for Cat A") so that the panel
+        # can move the page
         page = detect_page(q)
         if NAV_VERB.search(ql) and (page or detect_category(q)):
             if page is None:
@@ -254,7 +269,8 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
             a = act("navigate", **params)
             return f"{a.summary}.", [a]
 
-        # 8. Why this outlook? / Should I buy or wait?
+        # 8. why this outlook, or should I buy or wait, the app stays neutral so that it never gives
+        # a buy or wait call
         if re.search(r"should i (?:buy|wait)|buy (?:now )?or wait|good time to buy", ql):
             text, acts = _why(ctx, cat or "A")
             return ("COE Compass doesn't tell you to buy or to wait: it forecasts the COE premium, which is only "
@@ -265,15 +281,15 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                 return _why_all(ctx)
             return _why(ctx, cat or "A")
 
-        # 9. How certain is this?
+        # 9. how certain is this, so that the ranges and test results can be quoted
         if re.search(r"how (?:certain|sure|confident|reliable|accurate)|uncertain", ql):
             return _certainty(ctx, cat)
 
-        # 10. Quota vs premium
+        # 10. quota vs premium so that the supply effect can be shown with real numbers
         if re.search(r"quota|supply", ql) and re.search(r"reduce|lower|increase|raise|affect|effect|impact|drop", ql):
             return _quota_effect(conn, ctx, cat or "B")
 
-        # 11. Explain this page
+        # 11. explain this page so that first-time users get a walk through
         if re.search(r"explain (?:this|the) page|what am i looking at|what is this page|first car|beginner", ql):
             intro = PAGE_INTRO.get(view.page, PAGE_INTRO["overview"])
             tip = ""
@@ -283,18 +299,20 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
                     tip = f" For Cat {cat} right now: {c['outlook']['summary']}"
             return intro + tip, []
 
-        # 12. Glossary
+        # 12. glossary, this sits late so that action requests above win over a term that happens to
+        # be in them
         for term_id, pattern in GLOSSARY_KEYS:
             if re.search(pattern, ql):
                 g = glossary()[term_id]
                 return f"{g['term']}: {g['simple']}\n\nMore detail: {g['technical']}", []
 
-        # 13. Cat A vs Cat B
+        # 13. Cat A vs Cat B so that a comparison gets the category definitions
         if re.search(r"difference|compare|versus|\bvs\b", ql) and len(set(_CAT.findall(q))) >= 2:
             return glossary()["categories"]["simple"], []
     except ActionError as exc:
         return f"I couldn't do that: {exc}", []
 
+    # this lists what still works when nothing matched so that the user knows what to try
     return (
         "I can't answer that in basic mode – the AI model isn't available on this server right now. I can still: "
         "open pages ('show me Cat E'), try supply scenarios ('what if supply rises 10%?'), work out bids "
@@ -306,16 +324,19 @@ def answer(question: str, ctx: AnalystContext, conn: Connection) -> tuple[str, l
 # ---------------------------------------------------------------------------
 # Composed answers
 # ---------------------------------------------------------------------------
+# this stays on the bid page if they are already there so that the chart just updates
 def _bid_action(view, cat: str, bid: int) -> Action:
     if view.page == "bid" and view.category == cat:
         return validate("set_bid_amount", {"amount": bid, "category": cat})
     return validate("navigate", {"page": "bid", "category": cat, "bid": bid})
 
 
+# this finds one category's data so that the helpers below read from the same entry
 def _category_entry(ctx: AnalystContext, cat: str) -> dict:
     return next(c for c in ctx.app_data["categories"] if c["code"] == cat)
 
 
+# this explains one outlook using the same rule as the app so that the answer matches the page
 def _why(ctx: AnalystContext, cat: str):
     c = _category_entry(ctx, cat)
     rec = c.get("outlook")
@@ -339,6 +360,7 @@ def _why(ctx: AnalystContext, cat: str):
     return text, [validate("highlight", {"target": "recommendation"})] if ctx.view.page == "forecast" else []
 
 
+# this explains all categories at once so that "why do they all say the same" gets a real answer
 def _why_all(ctx: AnalystContext):
     cats = [c for c in ctx.app_data["categories"] if c.get("outlook")]
     if not cats:
@@ -361,6 +383,8 @@ def _why_all(ctx: AnalystContext):
     return head + "\n\n" + "\n".join(lines) + "\n\n" + tail, []
 
 
+# this reports how wide the range is and how the model tested so that "how sure" has an honest
+# answer
 def _certainty(ctx: AnalystContext, cat: str | None):
     acc = ctx.app_data.get("model_accuracy") or {}
     hybrid = next((r for r in acc.get("leaderboard_by_pinball_loss", []) if r["model"].startswith("Hybrid")), None)
@@ -384,6 +408,8 @@ def _certainty(ctx: AnalystContext, cat: str | None):
     return text, []
 
 
+# this finds the largest effect for the category so that "what changed premiums most" can be
+# answered
 def _biggest_policy(ctx: AnalystContext, cat: str):
     best = None
     for ev in ctx.app_data["policy_events"]:
@@ -402,6 +428,7 @@ def _biggest_policy(ctx: AnalystContext, cat: str):
         [validate("navigate", {"page": "policy", "category": cat, "event": ev["code"]})]
 
 
+# this compares -20% and +20% supply so that the effect of quota is shown with numbers
 def _quota_effect(conn: Connection, ctx: AnalystContext, cat: str):
     lo = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "quota_pct": -20})
     hi = tools.run(conn, ctx, "scenario_forecast", {"category": cat, "quota_pct": 20})

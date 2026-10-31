@@ -45,6 +45,7 @@ class GatedLinearUnit(nn.Module):
 
     def __init__(self, d_in: int, d_out: int, dropout: float):
         super().__init__()
+        # this makes twice the outputs so that GLU can use half of them as the gate
         self.dropout = nn.Dropout(dropout)
         self.fc = nn.Linear(d_in, 2 * d_out)
 
@@ -69,6 +70,7 @@ class GatedResidualNetwork(nn.Module):
 
     def __init__(self, d_in: int, d_hidden: int, d_out: int, dropout: float, d_context: int | None = None):
         super().__init__()
+        # this resizes the skip path only when sizes differ so that it can be added to the output
         self.skip = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
         self.fc1 = nn.Linear(d_in, d_hidden)
         self.context = nn.Linear(d_context, d_hidden, bias=False) if d_context else None
@@ -77,6 +79,8 @@ class GatedResidualNetwork(nn.Module):
 
     def forward(self, x: torch.Tensor, context: torch.Tensor | None = None) -> torch.Tensor:
         hidden = self.fc1(x)
+        # this adds the context when there is one so that the block can behave differently per
+        # category
         if context is not None and self.context is not None:
             hidden = hidden + self.context(context)
         hidden = self.fc2(F.elu(hidden))
@@ -93,8 +97,11 @@ class VariableSelectionNetwork(nn.Module):
     def __init__(self, n_vars: int, d_model: int, dropout: float, d_context: int | None = None):
         super().__init__()
         self.n_vars = n_vars
+        # these are one linear map per variable so that each single number becomes a vector
         self.embed_weight = nn.Parameter(torch.randn(n_vars, d_model) * 0.1)
         self.embed_bias = nn.Parameter(torch.zeros(n_vars, d_model))
+        # this block scores the variables and the list below processes each one, so that weak inputs
+        # can be scaled down
         self.selector = GatedResidualNetwork(n_vars * d_model, d_model, n_vars, dropout, d_context)
         self.var_grns = nn.ModuleList(
             GatedResidualNetwork(d_model, d_model, d_model, dropout) for _ in range(n_vars)
@@ -103,6 +110,7 @@ class VariableSelectionNetwork(nn.Module):
     def forward(self, x: torch.Tensor, context: torch.Tensor | None = None):
         # x: [..., n_vars]  ->  embeddings: [..., n_vars, d_model]
         emb = x.unsqueeze(-1) * self.embed_weight + self.embed_bias
+        # this flattens all embeddings together so that the selector sees every variable at once
         flat = emb.flatten(start_dim=-2)
         weights = torch.softmax(self.selector(flat, context), dim=-1)            # [..., n_vars]
         processed = torch.stack([grn(emb[..., i, :]) for i, grn in enumerate(self.var_grns)], dim=-2)
@@ -119,9 +127,12 @@ class InterpretableMultiHeadAttention(nn.Module):
 
     def __init__(self, d_model: int, n_heads: int, dropout: float):
         super().__init__()
+        # this splits the width across the heads so that adding heads does not grow the model
         self.d_head = d_model // n_heads
         self.q_proj = nn.ModuleList(nn.Linear(d_model, self.d_head) for _ in range(n_heads))
         self.k_proj = nn.ModuleList(nn.Linear(d_model, self.d_head) for _ in range(n_heads))
+        # this is one shared value projection so that the averaged attention can be read as one
+        # pattern
         self.v_proj = nn.Linear(d_model, self.d_head)
         self.out = nn.Linear(self.d_head, d_model)
         self.dropout = nn.Dropout(dropout)
@@ -129,12 +140,15 @@ class InterpretableMultiHeadAttention(nn.Module):
     def forward(self, q, k, v, mask: torch.Tensor):
         values = self.v_proj(v)
         heads, attns = [], []
+        # this runs each head with its own query and key so that they can focus on different things
         for q_proj, k_proj in zip(self.q_proj, self.k_proj):
             scores = q_proj(q) @ k_proj(k).transpose(-2, -1) / math.sqrt(self.d_head)
+            # this blocks masked positions so that a step cannot look ahead
             attn = torch.softmax(scores.masked_fill(mask, float("-inf")), dim=-1)
             attn = self.dropout(attn)
             heads.append(attn @ values)
             attns.append(attn)
+        # this averages the heads so that we get one attention pattern to show
         head = torch.stack(heads).mean(dim=0)
         return self.out(head), torch.stack(attns).mean(dim=0)
 
@@ -155,16 +169,21 @@ class MonotoneQuantileHead(nn.Module):
         self.fc = nn.Linear(d_model, len(quantiles))
         self.register_buffer("step_scale", torch.ones(horizon))
 
+        # this takes the gaps between normal quantiles so that the untrained head gives sensible
+        # ranges
         z = torch.distributions.Normal(0.0, 1.0).icdf(torch.tensor(quantiles))
         gaps = torch.cat([z[1:self.median_idx + 1] - z[:self.median_idx],     # lower spacings
                           z[self.median_idx + 1:] - z[self.median_idx:-1]])   # upper spacings
         nn.init.normal_(self.fc.weight, std=0.01)
         with torch.no_grad():
+            # this inverts softplus on the gaps so that the first output equals those gaps
             bias = torch.log(torch.expm1(gaps))                                # softplus^-1
             self.fc.bias.copy_(torch.cat([bias[:self.median_idx], torch.zeros(1), bias[self.median_idx:]]))
 
     def forward(self, h: torch.Tensor, anchor: torch.Tensor) -> torch.Tensor:
         raw = self.fc(h)
+        # this takes the median then adds positive gaps up and down so that quantiles can never
+        # cross
         m = self.median_idx
         median = raw[..., m:m + 1]
         upper = median + torch.cumsum(F.softplus(raw[..., m + 1:]), dim=-1)
@@ -192,17 +211,23 @@ class TemporalFusionTransformer(nn.Module):
         d = hidden_size
         self.quantiles = quantiles
 
-        # Static covariate encoders -> context vectors (selection, enrichment, LSTM h0 / c0).
+        # this turns the category into 4 context vectors (selection, enrichment, LSTM h0 and c0) so
+        # that every stage knows which category it is forecasting
         self.static_embedding = nn.Embedding(n_categories, d)
         self.static_contexts = nn.ModuleList(GatedResidualNetwork(d, d, d, dropout) for _ in range(4))
 
+        # these pick the useful inputs for past and future so that we get importance weights for
+        # each
         self.encoder_vsn = VariableSelectionNetwork(n_encoder_vars, d, dropout, d_context=d)
         self.decoder_vsn = VariableSelectionNetwork(n_decoder_vars, d, dropout, d_context=d)
 
+        # this is the LSTM pair so that short term patterns over time are captured
         self.lstm_encoder = nn.LSTM(d, d, batch_first=True)
         self.lstm_decoder = nn.LSTM(d, d, batch_first=True)
         self.post_lstm_gate = GateAddNorm(d, d, dropout)
 
+        # these are the layers after the LSTM so that static context, attention and the quantile
+        # head follow the TFT paper
         self.static_enrichment = GatedResidualNetwork(d, d, d, dropout, d_context=d)
         self.attention = InterpretableMultiHeadAttention(d, attention_heads, dropout)
         self.post_attention_gate = GateAddNorm(d, d, dropout)
@@ -220,30 +245,42 @@ class TemporalFusionTransformer(nn.Module):
         """
         L, H = encoder_x.shape[1], decoder_x.shape[1]
 
+        # this makes the four context vectors from the category so that later layers can use them
         s = self.static_embedding(static)
         c_select, c_enrich, c_h, c_c = (grn(s) for grn in self.static_contexts)
 
+        # this repeats the context for each time step so that input selection can use it at every
+        # step
         enc_sel, enc_w = self.encoder_vsn(encoder_x, c_select.unsqueeze(1).expand(-1, L, -1))
         dec_sel, dec_w = self.decoder_vsn(decoder_x, c_select.unsqueeze(1).expand(-1, H, -1))
 
+        # this starts the LSTM from the category context so that each category begins from its own
+        # state
         state = (c_h.unsqueeze(0).contiguous(), c_c.unsqueeze(0).contiguous())
         enc_out, state = self.lstm_encoder(enc_sel, state)
+        # this hands the encoder state to the decoder so that the forecast carries on from the past
         dec_out, _ = self.lstm_decoder(dec_sel, state)
 
+        # this adds a gated skip around the LSTM so that the model can bypass it if it does not help
         selected = torch.cat([enc_sel, dec_sel], dim=1)
         temporal = self.post_lstm_gate(torch.cat([enc_out, dec_out], dim=1), selected)   # [B, L+H, d]
 
+        # this mixes the category back into each step so that attention sees the static context
         enriched = self.static_enrichment(temporal, c_enrich.unsqueeze(1).expand(-1, L + H, -1))
 
-        # Decoder positions attend to the whole past and to earlier forecast steps only.
+        # forecast steps can look at the whole past and earlier forecast steps only, this mask is
+        # there so that no step can see the future
         query = enriched[:, L:]
         causal = torch.ones(H, L + H, dtype=torch.bool, device=query.device).triu(diagonal=L + 1)
         attn_out, attn = self.attention(query, enriched, enriched, causal)
 
+        # this applies the last gates and skip connections so that the head gets clean hidden states
         h = self.post_attention_gate(attn_out, query)
         h = self.positionwise_grn(h)
         h = self.pre_output_gate(h, temporal[:, L:])
 
+        # this turns hidden states into quantiles around the last premium so that the model predicts
+        # the change
         prediction = self.head(h, anchor.view(-1, 1, 1))
         return {
             "prediction": prediction,
@@ -258,6 +295,8 @@ def quantile_loss(prediction: torch.Tensor, target: torch.Tensor, quantiles: lis
 
     prediction: [B, H, Q]; target: [B, H].
     """
+    # this compares each quantile with the target so that being wrong on either side costs according
+    # to q
     q = torch.tensor(quantiles, dtype=prediction.dtype, device=prediction.device)
     error = target.unsqueeze(-1) - prediction
     return torch.maximum(q * error, (q - 1) * error).mean()

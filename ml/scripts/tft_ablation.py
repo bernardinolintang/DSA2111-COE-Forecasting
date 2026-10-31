@@ -23,6 +23,7 @@ NOTE: TFT results change between runs and machines. Without --epochs it takes ab
 import argparse, dataclasses, json, os, sys
 from pathlib import Path
 
+# this adds the image's code folder when running in docker so that coe_ml can be imported
 if os.path.isdir("/app"):
     sys.path.insert(0, "/app")
 
@@ -31,11 +32,15 @@ from coe_ml.config import PipelineConfig
 from coe_ml.features import build_panel
 from coe_ml.evaluation import backtest
 
+# these are the two models and the columns to compare so that the script only reports what the
+# ablation needs
 WITH, WITHOUT = "tft", "tft_no_policy"
 COLS = ["pinball", "mae", "mape", "direction", "coverage80"]
 
 
 def main():
+    # these options are there so that the run can be repeated with other epochs, seeds or output
+    # folders
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="download fresh data (default: committed snapshot)")
     ap.add_argument("--seeds", type=int, default=3)
@@ -45,11 +50,14 @@ def main():
                     help="force the same epoch count for both models (skips CV epoch selection)")
     a = ap.parse_args()
 
+    # this builds the panel from the snapshot unless --live is set so that reruns use the same data
     panel = build_panel(ingest.load_coe_results(offline=not a.live),
                         ingest.load_macro(offline=not a.live))
     print(f"Panel rows: {len(panel)}  Latest month: {panel['month'].max()}")
 
     cfg = PipelineConfig()
+    # this forces the same epoch count on both models so that the only difference is the policy
+    # inputs
     if a.epochs:
         cfg = dataclasses.replace(
             cfg,
@@ -58,13 +66,16 @@ def main():
     if a.workers:
         cfg = dataclasses.replace(cfg, n_workers=a.workers)
 
+    # this backtests only the two TFTs so that the run stays short
     result = backtest(panel, cfg, n_seeds=a.seeds, models=[WITH, WITHOUT])
     print("Epochs used:", result.best_epochs,
           "(forced)" if a.epochs else "(chosen by cross-validation)")
+    # this warns if the forced epochs did not apply so that a bad run does not look valid
     if a.epochs and set(result.best_epochs.values()) != {a.epochs}:
         print(f"WARNING: expected both models to use {a.epochs} epochs. "
               "The --epochs option may not have taken effect.")
 
+    # this saves the raw outputs so that the results can be checked later or fed into dm_ablation.py
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     result.predictions.to_csv(out / "predictions.csv", index=False)
@@ -74,6 +85,8 @@ def main():
                "data_through": str(panel["month"].max())},
               open(out / "run_info.json", "w"), indent=2, default=str)
 
+    # this puts both models side by side so that we can work out the percent change from adding
+    # policy
     m = result.metrics
     a_ = m[m["model"] == WITH].set_index(["category", "horizon"])[COLS].add_suffix("_with_policy")
     b_ = m[m["model"] == WITHOUT].set_index(["category", "horizon"])[COLS].add_suffix("_without_policy")
@@ -84,6 +97,7 @@ def main():
     comp = comp.sort_values(["category", "horizon"])
     comp.to_csv(out / "comparison_by_category_horizon.csv", index=False)
 
+    # this prints the results from overall down to each cell so that we can see where policy helped
     show = ["category", "horizon", "pinball_with_policy", "pinball_without_policy", "pinball_change_pct"]
     print("\n=== OVERALL (category *, horizon 0) ===")
     print(comp[(comp.category == "*") & (comp.horizon == 0)][show].to_string(index=False))
@@ -96,5 +110,6 @@ def main():
     print(f"\nSaved in: {out}")
 
 
+# this runs main only when called directly so that spawned workers can import this file safely
 if __name__ == "__main__":
     main()

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date
 
 
+# this describes one policy change so that all events share the same fields
 @dataclass(frozen=True)
 class PolicyEvent:
     code: str
@@ -27,10 +28,12 @@ class PolicyEvent:
     source_url: str
     end: date | None = None
 
+    # this checks if a category was hit by the policy so that dummies only turn on where they apply
     def affects(self, category: str) -> bool:
         return category in self.categories
 
 
+# this is the full list of policy events so that adding one only means adding an entry here
 POLICY_EVENTS: list[PolicyEvent] = [
     PolicyEvent(
         code="mas_loan_curbs_2013",
@@ -132,6 +135,7 @@ POLICY_EVENTS: list[PolicyEvent] = [
     ),
 ]
 
+# this indexes events by code so that one event can be looked up directly
 EVENTS_BY_CODE = {event.code: event for event in POLICY_EVENTS}
 
 

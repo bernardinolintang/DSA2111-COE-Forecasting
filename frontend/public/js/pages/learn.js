@@ -12,12 +12,14 @@ import { explain } from "../glossary.js";
 import { LEARN_SECTIONS } from "../route.js";
 import { html, money, mount, pct, sgt } from "../util.js";
 
+// this is the source dataset link so that it is only stored once
 const DATASET_URL = "https://data.gov.sg/datasets/d_69b3380ad7e51aff3a7dcc84eba52b8a/view";
 
 /** One question: a native disclosure, so it works with the keyboard and without JS state. */
 const qa = (question, answer, open = false) => html`
   <details class="faq-item"${open ? html` open` : ""}><summary>${question}</summary><div class="faq-body">${answer}</div></details>`;
 
+// this is the heading of each section so that the page can draw it from the route
 const HEAD = {
   guide: ["COE guide", "How COE works.", "The essentials of Singapore's Certificate of Entitlement, before any forecasting comes into it."],
   how: ["How it works", "How COE Compass makes forecasts.", "What goes in, how the models are checked, and what the numbers can and cannot tell you."],
@@ -26,6 +28,7 @@ const HEAD = {
   about: ["About", "About COE Compass.", "What this is, who runs it, and what it stores about you."],
 };
 
+// this writes the COE guide so that first-time buyers can learn the basics
 function guide(categories) {
   return html`
     ${qa("What is a COE?", html`
@@ -78,6 +81,7 @@ function guide(categories) {
       <a href="https://onemotoring.lta.gov.sg" target="_blank" rel="noopener">OneMotoring<span class="visually-hidden"> (opens in a new tab)</span> ↗</a>.</p>`;
 }
 
+// these are the steps of the forecast process so that the how section can list them
 const PIPELINE = [
   ["Collect", "After each bidding exercise, the published results and quotas are fetched from data.gov.sg, with inflation, interest rates and GDP from the Department of Statistics."],
   ["Model", "Several forecasting methods are trained side by side. One of them, Box-Tiao intervention analysis, measures what each past policy change did to premiums."],
@@ -86,6 +90,7 @@ const PIPELINE = [
   ["Publish", "The newest forecast is stored with its model run, timestamp and the data it used, then shown here."],
 ];
 
+// this explains the method with live numbers so that the page always matches the latest run
 function how(live) {
   const ours = live.metrics?.leaderboard.find((r) => r.model === "hybrid");
   const naive = live.metrics?.leaderboard.find((r) => r.model === "naive");
@@ -140,6 +145,7 @@ function how(live) {
     <p class="mt-24"><a class="link-arrow" href="#/model?section=technical">View the technical methodology and evaluation</a></p>`;
 }
 
+// this lists the data sources and freshness so that a reader can check where numbers came from
 function sources(live) {
   const s = live.summary;
   return html`
@@ -173,6 +179,7 @@ function sources(live) {
     <p class="mt-24"><a class="link-arrow" href="/api/docs" target="_blank" rel="noopener">API documentation</a></p>`;
 }
 
+// this answers common questions so that users can help themselves
 function faq() {
   return html`
     <div class="help-actions">
@@ -214,6 +221,7 @@ function faq() {
     </div>`;
 }
 
+// this says who runs the site and what it stores so that visitors can trust it
 function about() {
   return html`
     <div class="grid grid-2">
@@ -238,6 +246,7 @@ function about() {
       <a class="link-arrow" href="#/learn/sources">Data sources</a><a class="link-arrow" href="#/model">Model performance</a></p>`;
 }
 
+// this draws the chosen section so that each one has its own route
 export async function render(root, { section = "guide" } = {}) {
   const sec = LEARN_SECTIONS.includes(section) ? section : "guide";
   const [eyebrow, title, subtitle] = HEAD[sec];
@@ -250,7 +259,7 @@ export async function render(root, { section = "guide" } = {}) {
     <section class="container learn mt-24" id="learn-body" data-anchor="learn-${sec}"><div class="skeleton" style="height:320px"></div></section>`);
   setView({ facts: [{ label: "Section", value: eyebrow }] });
 
-  // Live facts are a bonus: each section still renders if they can't be loaded.
+  // live facts are a bonus so that each section still renders if they can't be loaded
   const need = { guide: ["categories"], how: ["summary", "metrics"], sources: ["summary"] }[sec] || [];
   const paths = { categories: "/categories", summary: "/summary", metrics: "/model/metrics" };
   const loaded = await Promise.all(need.map((k) => api.get(paths[k]).catch(() => null)));
@@ -258,7 +267,8 @@ export async function render(root, { section = "guide" } = {}) {
   if (!root.isConnected) return undefined;
   const body = sec === "guide" ? guide(live.categories || [])
     : sec === "how" ? how(live) : sec === "sources" ? sources(live) : sec === "faq" ? faq() : about();
-  // Reading sections keep a comfortable line length; tables and card grids use the full width.
+  // reading sections keep a comfortable line length so that long text is easy to read, tables and
+  // card grids use the full width
   const narrow = sec === "guide" || sec === "how" || sec === "faq";
   mount(root.querySelector("#learn-body"), narrow ? html`<div class="measure">${body}</div>` : body);
   return undefined;

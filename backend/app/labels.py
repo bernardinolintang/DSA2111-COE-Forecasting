@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
+# this is the display text for each category so that the UI and analyst say the same thing
 CATEGORIES = {
     "A": {"name": "Cat A", "title": "Small cars",
           "description": "Cars up to 1,600cc and 97kW (130bhp); fully-electric cars up to 110kW."},
@@ -17,6 +18,7 @@ CATEGORIES = {
           "description": "Any vehicle except motorcycles. Usually tracks Cat B."},
 }
 
+# this is the display text for each supply scenario so that codes in the database stay out of the UI
 SCENARIOS = {
     "base": {"label": "As announced", "multiplier": 1.0,
              "description": "Next quarter's quota stays at the current level."},
@@ -30,6 +32,7 @@ SCENARIOS = {
                       "description": "Next quarter's quota is 20% higher than today."},
 }
 
+# these are the display names of the models so that the leaderboard reads properly
 MODELS = {
     "hybrid": "Hybrid: TFT + Box-Tiao ARIMAX (ours)",
     "tft": "TFT with policy inputs",
@@ -41,6 +44,7 @@ MODELS = {
     "naive": "Random walk",
 }
 
+# these are the display names of the model inputs so that the importance chart reads in plain words
 VARIABLES = {
     "target": "Premium history",
     "target_diff": "Recent momentum",
@@ -69,6 +73,7 @@ VARIABLES = {
 }
 
 
+# this formats an exercise in one way so that every page labels it the same
 def exercise_label(month: date, bidding_no: int) -> str:
     """e.g. 'Oct 2026 · 1st'."""
     return f"{month:%b %Y} · {'1st' if bidding_no == 1 else '2nd'}"

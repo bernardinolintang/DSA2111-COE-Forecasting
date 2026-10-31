@@ -1,6 +1,7 @@
 # Non-secret settings shared by the API and the ML job.
 # The database password lives in the "coe-db" Secret, created by deploy.sh
 # (never committed to Git).
+# this is a ConfigMap so that settings can change without rebuilding images
 apiVersion: v1
 kind: ConfigMap
 metadata:

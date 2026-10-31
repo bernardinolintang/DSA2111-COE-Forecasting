@@ -20,11 +20,13 @@ import { scenarioLabel } from "./forecast-math.js";
 import { startTour } from "./tour.js";
 import { ICONS, clientId, esc, html, money, raw, toast } from "./util.js";
 
+// these are the storage key and limits so that the chat stays small and cannot hang
 const THREAD_KEY = "coe-analyst-thread";
 const MAX_TURNS_SENT = 12;
 const TIMEOUT_MS = 75_000;
 const PAGE_NAMES = { overview: "Overview", forecast: "Forecast", scenario: "Scenario Lab", bid: "Bid planner", plan: "My plan",
                      policy: "Policy Lab", model: "Model performance", alerts: "Watchlist", learn: "Learn" };
+// this maps action targets to page anchors so that the panel can highlight them
 const HIGHLIGHT = {
   "category-cards": "category-cards", "forecast-chart": "forecast-chart", recommendation: "recommendation",
   "scenario-picker": "scenario-picker", "forecast-table": "forecast-table", "bid-chart": "bid-chart",
@@ -34,6 +36,7 @@ const HIGHLIGHT = {
   "watchlist-form": "watchlist-form",
 };
 
+// these are starter questions per page so that users know what to ask
 const SUGGESTIONS = {
   overview: ["Explain this page like I'm buying my first car", "Why do all categories show the same outlook?", "What's the difference between Cat A and Cat B?"],
   forecast: ["Why is this showing {label}?", "Explain this chart simply", "How certain is this forecast?", "What if supply rises 10%?"],
@@ -46,6 +49,7 @@ const SUGGESTIONS = {
   learn: ["Explain COE like I'm buying my first car", "What does the 80% range mean?", "Compare Cat A and Cat B"],
 };
 
+// these are the panel's state so that all the functions below can share it
 let panel = null;
 let fab = null;
 let thread = [];              // [{ role, content, actions?, provenance?, notice?, mode?, error?, question? }]
@@ -53,9 +57,11 @@ let busy = false;
 let status = null;
 let lastFocus = null;
 
+// this restores the chat from this tab so that a reload does not lose it
 function load() {
   try { thread = (JSON.parse(sessionStorage.getItem(THREAD_KEY)) || []).filter((m) => !m.pending); } catch { thread = []; }
 }
+// this saves finished messages so that half-written replies are not restored
 function save() {
   const done = thread.filter((m) => !m.pending).slice(-30)
     .map(({ shown, revealAfter, final, ...m }) => m);            // drop streaming bookkeeping
@@ -78,6 +84,7 @@ export function formatReply(text) {
   }).join("");
 }
 
+// this describes the view in a line so that the user sees what the analyst is looking at
 function describeView(v) {
   const bits = [PAGE_NAMES[v.page] || "COE Compass"];
   if (v.category) bits.unshift(`Cat ${v.category}`);
@@ -85,6 +92,7 @@ function describeView(v) {
   return bits.join(" · ");
 }
 
+// this redraws the panel header so that it follows the page
 function paintContext() {
   if (!panel) return;
   const v = getView();
@@ -102,6 +110,7 @@ function paintContext() {
     `<button type="button" class="chip-q" data-q="${esc(s)}">${esc(s)}</button>`).join("");
 }
 
+// this draws a confirm card for a saved action so that nothing happens without a click
 function actionCard(a, index, msgIndex) {
   if (!a.confirm) return html`<div class="action-chip">${raw(ICONS.send)}${a.summary}</div>`;
   const state = a.state || "pending";
@@ -116,11 +125,13 @@ function actionCard(a, index, msgIndex) {
     </div></div>`;
 }
 
+// this puts the caret inside the last paragraph so that it sits right after the text
 function withCaret(markup) {
   const i = Math.max(markup.lastIndexOf("</p>"), markup.lastIndexOf("</li>"));
   return i < 0 ? `${markup}<span class="caret"></span>` : `${markup.slice(0, i)}<span class="caret"></span>${markup.slice(i)}`;
 }
 
+// this draws one assistant message so that streaming, errors and actions all show the same way
 function botBubble(m, i) {
   if (m.error) {
     return `<div class="msg msg-bot is-error" data-msg="${i}"><div class="bubble"><p>${esc(m.content)}</p>
@@ -142,8 +153,10 @@ function botBubble(m, i) {
   </div></div>`;
 }
 
+// this checks if the user is near the bottom so that streaming does not pull them away
 function nearBottom(list) { return list.scrollHeight - list.scrollTop - list.clientHeight < 60; }
 
+// this redraws the whole chat so that it always matches the thread
 function paintThread() {
   if (!panel) return;
   const list = panel.querySelector("#analyst-log");
@@ -170,6 +183,7 @@ function paintMessage(i) {
   if (pinned) list.scrollTop = list.scrollHeight;
 }
 
+// this shows the current mode so that the user knows if a model or basic mode is answering
 function paintStatus() {
   const badge = panel?.querySelector("#analyst-mode");
   if (!badge) return;
@@ -185,11 +199,13 @@ function paintStatus() {
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
+// this opens a page from an action so that the analyst can move the user around
 function go(params) {
   const hash = buildHash(params);
   if (location.hash !== hash) location.hash = hash;
 }
 
+// this flashes a page element so that the analyst can point at what it is explaining
 function flash(anchor) {
   const el = document.querySelector(`[data-anchor="${HIGHLIGHT[anchor]}"]`);
   if (!el) return;
@@ -220,7 +236,8 @@ export function perform(a) {
       return;
     }
     case "set_supply_scenario": {
-      // The Scenario Lab's slider: a whole percentage, or one of the modelled scenarios.
+      // the Scenario Lab's slider takes a whole percent or one of the modelled scenarios so that
+      // both forms work
       const cat = p.category || v.category || "A";
       const quota = clampQuota(p.quota_pct ?? scenarioPct(p.scenario) ?? 0);
       if (v.page === "scenario" && v.category === cat && pageAction("setQuota")) pageAction("setQuota")(quota);
@@ -241,10 +258,12 @@ export function perform(a) {
       startTour(p.step || 1);
       return;
     default:
-      // Persistent actions (prepare_watch / prepare_remove_watch) never run here.
+      // persistent actions (prepare_watch, prepare_remove_watch) never run here so that only a
+      // Confirm click can change the watchlist
   }
 }
 
+// this runs a confirmed watchlist change so that it only happens after the click
 async function confirmAction(mi, ai) {
   const a = thread[mi]?.actions?.[ai];
   if (!a || a.state === "done" || a.state === "working") return;
@@ -274,15 +293,16 @@ async function confirmAction(mi, ai) {
 // Conversation
 // ---------------------------------------------------------------------------
 // ---- Showing the answer ------------------------------------------------------
-// The thinking dots stay up for at least MIN_THINKING_MS so a fast answer never
-// just flickers. After that, streamed text is shown exactly as it arrives (real
-// streaming, with a caret while more is coming; no typewriter effect), and an
-// answer that arrives in one piece fades in once. Repaints are batched per frame.
+// the thinking dots stay up for at least MIN_THINKING_MS so that a fast answer does not just
+// flicker. after that streamed text is shown exactly as it arrives, and an answer in one piece
+// fades in once. repaints are batched per frame
 const MIN_THINKING_MS = 450;
 let revealFrame = 0;
 
+// this asks for one repaint so that many text chunks in a frame draw once
 function schedule() { if (!revealFrame) revealFrame = requestAnimationFrame(tick); }
 
+// this shows whatever has arrived so that the reply appears as it is written
 function tick() {
   revealFrame = 0;
   const i = thread.length - 1;
@@ -297,6 +317,7 @@ function tick() {
   if (m.final) finish(i);
 }
 
+// this finishes a message and runs its actions so that they only happen once the reply is done
 function finish(i) {
   const m = thread[i];
   Object.assign(m, m.final);
@@ -308,6 +329,7 @@ function finish(i) {
   for (const a of m.actions || []) if (!a.confirm) perform(a);
 }
 
+// this turns a message into an error with retry so that a failure is easy to recover from
 function fail(i, message) {
   const m = thread[i];
   if (!m?.pending) return;
@@ -323,6 +345,7 @@ function fail(i, message) {
   paintThread();
 }
 
+// this parses one Server-Sent Event so that onEvent gets clean data
 function parseEvent(raw) {
   let event = "message";
   let data = "";
@@ -333,6 +356,7 @@ function parseEvent(raw) {
   try { return { event, data: data ? JSON.parse(data) : {} }; } catch { return { event, data: {} }; }
 }
 
+// this handles each event type so that status, text and actions update the right thing
 function onEvent(i, { event, data }) {
   const m = thread[i];
   if (!m?.pending) return;
@@ -350,6 +374,7 @@ function onEvent(i, { event, data }) {
   }
 }
 
+// this sends a question and streams the reply so that the panel updates as it comes
 export async function send(question) {
   question = String(question || "").trim();
   if (!question || busy) return;
@@ -366,6 +391,7 @@ export async function send(question) {
   if (v.page === "bid" && v.bid) view.bid = v.bid;
   if (v.page === "policy" && v.event) view.event = v.event;
   thread.push({ role: "user", content: question });
+  // this sends only recent finished messages so that the request stays small
   const messages = thread.filter((m) => !m.error && !m.pending)
     .map((m) => ({ role: m.role, content: m.content })).slice(-MAX_TURNS_SENT);
   const i = thread.push({ role: "assistant", pending: true, content: "", shown: 0, status: "Thinking…", question,
@@ -375,6 +401,7 @@ export async function send(question) {
   paintThread();
   enter([...panel.querySelectorAll("#analyst-log .msg-user .bubble")].at(-1), { rise: 6, duration: DURATION.tab });
 
+  // this aborts after the timeout so that a stuck request cannot hang the panel
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -389,6 +416,8 @@ export async function send(question) {
       throw new Error(detail || `The analyst returned an error (${res.status}).`);
     }
     if ((res.headers.get("content-type") || "").includes("text/event-stream") && res.body) {
+      // this reads the stream chunk by chunk and splits on blank lines so that each event is
+      // handled when complete
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -404,6 +433,7 @@ export async function send(question) {
       }
       if (thread[i]?.pending && !thread[i].final) throw new Error("the answer was cut off");
     } else {                                                    // a plain JSON answer
+      // this handles a plain JSON reply so that it also works if streaming is not available
       const data = await res.json();
       onEvent(i, { event: "delta", data: { text: data.reply } });
       onEvent(i, { event: "done", data });
@@ -417,6 +447,7 @@ export async function send(question) {
   }
 }
 
+// this resends a failed question so that the user does not have to type it again
 function retry(i) {
   const m = thread[i];
   if (!m?.question) return;
@@ -428,8 +459,10 @@ function retry(i) {
 // ---------------------------------------------------------------------------
 // Panel
 // ---------------------------------------------------------------------------
+// this grows the input with its text so that long questions stay readable
 function resize(t) { t.style.height = "auto"; t.style.height = `${Math.min(t.scrollHeight, 140)}px`; }
 
+// this builds the panel once so that its listeners are only attached one time
 function build() {
   panel = document.createElement("aside");
   panel.className = "analyst";
@@ -471,6 +504,7 @@ function build() {
   panel.querySelector("#analyst-close").addEventListener("click", () => close());
   panel.querySelector("#analyst-clear").addEventListener("click", () => { thread = []; save(); paintThread(); input.focus(); });
   panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } });
+  // this handles clicks in one place so that buttons drawn later still work
   panel.addEventListener("click", (e) => {
     const q = e.target.closest("[data-q]");
     if (q) { send(q.dataset.q); return; }
@@ -489,8 +523,10 @@ function build() {
   onView(paintContext);
 }
 
+// this tracks the closing animation so that opening again can cancel it
 let closing = null;             // the drawer's exit animation, while it runs
 
+// this opens the panel so that it also loads the chat and moves focus into it
 export function open() {
   if (!panel) build();
   if (closing) {                // reopened mid-exit: stay open
@@ -514,6 +550,7 @@ export function open() {
   }
 }
 
+// this closes the panel and gives focus back so that keyboard users do not get lost
 export function close() {
   if (!panel || panel.hidden || closing) return;
   fab?.setAttribute("aria-expanded", "false");
@@ -523,7 +560,8 @@ export function close() {
     document.body.classList.remove("analyst-open");
     (lastFocus?.isConnected ? lastFocus : fab)?.focus({ preventScroll: true });
   };
-  // The drawer slides back out to the edge it came from (a fade with reduced motion).
+  // the drawer slides back out to the edge it came from (a fade with reduced motion) so that it
+  // matches how it opened
   if (!panel.animate) { done(); return; }
   closing = panel.animate(
     reducedMotion() ? [{ opacity: 1 }, { opacity: 0 }] : [{ transform: "none" }, { transform: "translateX(100%)" }],
@@ -531,9 +569,10 @@ export function close() {
   closing.onfinish = () => { const a = closing; done(); a?.cancel(); };
 }
 
+// this wires up the panel on start so that every page can use it
 export function installAnalyst() {
   load();
-  // The entry point is the "Ask Compass" button in the header, present on every page.
+  // the entry point is the "Ask Compass" button in the header so that it is present on every page
   fab = document.getElementById("ask-compass");
   fab.insertAdjacentHTML("afterbegin", ICONS.sparkle);
   fab.addEventListener("click", () => (panel && !panel.hidden ? close() : open()));

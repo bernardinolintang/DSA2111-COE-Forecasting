@@ -6,6 +6,7 @@ import { expect, test } from "./fixtures.js";
 // Records, at the very moment the chart's <svg> is inserted into #cdf, whether
 // it already has the probability curve. With the old code the SVG was inserted
 // empty and drawn one or two frames later (the blank chart in the recording).
+// this records the first painted frame so that the test can catch an empty chart
 async function watchFirstPaint(page) {
   await page.addInitScript(() => {
     window.__cdf = null;
@@ -16,6 +17,7 @@ async function watchFirstPaint(page) {
   });
 }
 
+// this runs for each category so that none of them has a first paint problem
 for (const cat of ["A", "B", "C", "D", "E"]) {
   test(`Cat ${cat}: chance chart is drawn in the same frame it is inserted`, async ({ page, problems }) => {
     await watchFirstPaint(page);
@@ -27,6 +29,7 @@ for (const cat of ["A", "B", "C", "D", "E"]) {
   });
 }
 
+// this checks a visit from another page so that the chart does not need a reload
 test("chart is drawn on first visit when navigating from another page", async ({ page }) => {
   await watchFirstPaint(page);
   await page.goto("/#/forecast/A");
@@ -36,6 +39,7 @@ test("chart is drawn on first visit when navigating from another page", async ({
   expect(await page.evaluate(() => window.__cdf)).toBe(true);
 });
 
+// this checks the explanation and nearby bids so that a bare percent is not all the user gets
 test("the planner says where the bid sits in the forecast and shows nearby bids", async ({ page, request }) => {
   const plan = await (await request.get("/api/bid-planner/A")).json();
   const money = (v) => `$${Math.round(v).toLocaleString("en-SG")}`;
@@ -66,6 +70,7 @@ test("the planner says where the bid sits in the forecast and shows nearby bids"
   await expect(page.locator("#bid-provenance")).toContainText("Forecast ID");
 });
 
+// this checks every control moves together so that the page never shows two different bids
 test("slider, typed input, probability and chart marker stay synchronised", async ({ page, request }) => {
   const plan = await (await request.get("/api/bid-planner/A")).json();
   await page.goto("/#/bid/A");
@@ -102,6 +107,7 @@ test("slider, typed input, probability and chart marker stay synchronised", asyn
   await expect(page).toHaveURL(/#\/bid\/A\?bid=\d+/);
 });
 
+// this checks a category change so that no Cat A number stays on screen
 test("changing category replaces every value (no stale Cat A numbers)", async ({ page, request }) => {
   const d = await (await request.get("/api/bid-planner/D")).json();
   await page.goto("/#/bid/A");
@@ -114,6 +120,7 @@ test("changing category replaces every value (no stale Cat A numbers)", async ({
   await expect(page.locator("#planner")).toContainText(median);
 });
 
+// this checks a shared link so that it opens at the bid in the url
 test("a ?bid= link opens the planner at that bid", async ({ page }) => {
   await page.goto("/#/bid/B?bid=150000");
   await expect(page.locator("#bid-input")).toHaveValue("150,000");

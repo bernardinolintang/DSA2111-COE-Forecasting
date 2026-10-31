@@ -1,5 +1,6 @@
 # PostgreSQL with a persistent volume. One replica: a database is stateful, so
 # it is not scaled like the stateless API / web pods.
+# this asks for 1Gi of disk so that data survives a pod restart
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -30,6 +31,7 @@ spec:
           image: postgres:16-alpine
           ports:
             - containerPort: 5432
+          # these set the database name and password so that they match what the API and ML job use
           env:
             - name: POSTGRES_DB
               value: coe
@@ -38,21 +40,26 @@ spec:
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef: { name: coe-db, key: password }
+            # this puts the data in a subfolder so that postgres does not fail on the volume's root
+            # folder
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+          # this checks postgres is ready so that the API only connects to a working database
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "coe", "-d", "coe"]
             initialDelaySeconds: 5
             periodSeconds: 5
+          # this restarts a stuck database so that it can heal itself
           livenessProbe:
             exec:
               command: ["pg_isready", "-U", "coe", "-d", "coe"]
             initialDelaySeconds: 30
             periodSeconds: 15
+          # these set CPU and memory limits so that one pod cannot use up the shared VM
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 500m, memory: 512Mi }
@@ -61,6 +68,7 @@ spec:
           persistentVolumeClaim:
             claimName: coe-db-data
 ---
+# this gives the database a stable name so that the API and ML job can find it
 apiVersion: v1
 kind: Service
 metadata:

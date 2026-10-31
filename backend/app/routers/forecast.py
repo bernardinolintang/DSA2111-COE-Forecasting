@@ -17,11 +17,13 @@ from .common import require_category, require_run, require_scenario, with_label
 
 router = APIRouter(tags=["forecast"])
 
+# this is the shared quota slider parameter so that every route validates it the same way
 QUOTA_PCT = Query(None, ge=sc.MIN_PCT, le=sc.MAX_PCT,
                   description="Next quarter's quota change in percent; overrides ``scenario``. Points between "
                               "the modelled scenarios are interpolated.")
 
 
+# this loads the run, forecast and history together so that the routes below stay short
 def _load(conn: Connection, category: str, scenario: str, quota_pct: int | None = None):
     run = require_run(conn)
     pct = sc.PCT_OF[scenario] if quota_pct is None else quota_pct
@@ -32,6 +34,7 @@ def _load(conn: Connection, category: str, scenario: str, quota_pct: int | None 
     return run, steps, history, pct
 
 
+# this lists the scenarios with their percent so that the front end can build its buttons
 @router.get("/scenarios", response_model=list[Scenario])
 def scenarios():
     return [{"id": key, "quota_pct": sc.PCT_OF[key], **meta} for key, meta in SCENARIOS.items()]
@@ -41,8 +44,11 @@ def scenarios():
 def forecast(category: str, scenario: str = "base", quota_pct: int | None = QUOTA_PCT,
              conn: Connection = Depends(get_connection)):
     """Quantile forecast (p5 ... p95) for the next quota quarter."""
+    # this validates the inputs first so that bad requests stop before any query
     category, scenario = require_category(category), require_scenario(scenario)
     run, steps, history, pct = _load(conn, category, scenario, quota_pct)
+    # this returns "custom" for a slider value between modelled points so that the page knows it was
+    # interpolated
     return {"category": category, "scenario": sc.scenario_id(pct) or "custom", "quota_pct": pct, "run": run,
             "origin": with_label(history[-1]), "steps": [with_label(s) for s in steps]}
 
@@ -55,6 +61,8 @@ def recommendation(category: str, scenario: str = "base", quota_pct: int | None 
     """Market outlook: which way the forecast leans, how clearly, and the evidence behind it."""
     category, scenario = require_category(category), require_scenario(scenario)
     _, steps, history, pct = _load(conn, category, scenario, quota_pct)
+    # this builds the outlook from the forecast and the last 48 exercises so that the drivers can
+    # compare with the past year
     advice = advise(CATEGORIES[category]["name"], history[-1]["premium"], steps, history[-48:],
                     threshold or settings.wait_threshold)
     return {"category": category, "scenario": sc.scenario_id(pct) or "custom", "quota_pct": pct, **vars(advice)}
@@ -73,8 +81,10 @@ def bid_planner(category: str, bid: float | None = Query(None, gt=0),
     _, steps, _, _ = _load(conn, category, "base")
     nxt = steps[0]
     values = qt.row_values(nxt)
+    # this defaults to the 75% level so that the page opens on a sensible bid
     bid = bid or qt.quantile(values, 0.75)
 
+    # this samples 60 points across the forecast range so that the page can draw a smooth curve
     lo, hi = qt.quantile(values, 0.01), qt.quantile(values, 0.99)
     curve = [{"bid": lo + (hi - lo) * i / 59, "probability_pct": 0.0} for i in range(60)]
     for point in curve:
@@ -85,6 +95,8 @@ def bid_planner(category: str, bid: float | None = Query(None, gt=0),
         "win_probability_pct": round(qt.cdf(values, bid) * 100, 1),
         "expected_premium": nxt["q50"],
         "q10": nxt["q10"], "q25": nxt["q25"], "q75": nxt["q75"], "q90": nxt["q90"],
+        # this gives the bids for common confidence levels so that the page can show them as quick
+        # picks
         "suggestions": [{"confidence_pct": c, "bid": qt.quantile(values, c / 100)} for c in (50, 75, 90, 95)],
         "curve": curve,
     }

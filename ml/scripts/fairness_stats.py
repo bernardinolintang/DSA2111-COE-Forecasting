@@ -25,13 +25,17 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
+# this adds the ml folder to the path so that coe_ml can be imported from here
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from coe_ml import db                                     # noqa: E402
 
+# these set the bootstrap block size and number of resamples so that overlapping forecasts stay
+# together in a block
 BLOCK, N_BOOT = 6, 5000
 
-# Same exercise counter as features.build_panel: only exercises where all five categories were auctioned.
+# this uses the same exercise counter as features.build_panel (only exercises where all five
+# categories were auctioned) so that origins match the stored predictions
 QUERY = """
 WITH exercises AS (
     SELECT month, bidding_no, row_number() OVER (ORDER BY month, bidding_no) - 1 AS time_idx
@@ -45,12 +49,15 @@ WHERE p.run_id = :run_id
 """
 
 
+# this averages pinball over p10, p50 and p90 so that each row gets one loss number
 def pinball(df: pd.DataFrame) -> np.ndarray:
     y = df["actual"]
     return np.mean([np.maximum(tau * (y - df[c]), (tau - 1) * (y - df[c]))
                     for c, tau in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9))], axis=0)
 
 
+# this draws random blocks of origins N_BOOT times so that the bootstrap keeps the overlap between
+# neighbouring forecasts
 def block_indices(n: int, rng: np.random.Generator) -> list[np.ndarray]:
     starts = np.arange(n - BLOCK + 1)
     n_blocks = int(np.ceil(n / BLOCK))
@@ -76,14 +83,18 @@ def report(df: pd.DataFrame) -> None:
         raise ValueError("the predictions need the random walk ('naive') as the benchmark")
     df = df.copy()
     df["loss"] = pinball(df)
+    # this fixes the random seed so that the confidence intervals can be repeated
     rng = np.random.default_rng(0)
 
+    # check 0: this confirms the random walk equals the origin premium so that we know the join is
+    # right
     naive = df[df["model"] == "naive"]
     same = np.isclose(naive["q50"], naive["origin_premium"], rtol=1e-6).mean() * 100
     print(f"{len(df)} predictions, {df['origin'].nunique()} origins, "
           f"{df['month'].min():%b %Y} - {df['month'].max():%b %Y}")
     print(f"\n0. Integrity: random-walk median == origin premium in {same:.1f}% of rows")
 
+    # check 1: this pools the scores per model so that each model gets one headline number
     err = (df["q50"] - df["actual"]).abs()
     pooled = pd.DataFrame({
         "pinball": df.groupby("model")["loss"].mean(),
@@ -93,6 +104,7 @@ def report(df: pd.DataFrame) -> None:
     pooled["skill_vs_rw_%"] = (1 - pooled["pinball"] / pooled.loc["naive", "pinball"]) * 100
     print("\n1. Pooled scores\n", pooled.sort_values("pinball").round(2))
 
+    # check 2: this bootstraps the skill so that we can tell a real gain from luck
     per_origin = df.pivot_table(index="origin", columns="model", values="loss", aggfunc="mean")
     idx = block_indices(len(per_origin), rng)
     print("\n2. Skill vs random walk, 95% block-bootstrap CI (positive = better than random walk)")
@@ -104,11 +116,15 @@ def report(df: pd.DataFrame) -> None:
         print(f"   {model:15s} {(1 - loss.mean() / rw.mean()) * 100:+6.2f}%  CI [{lo:+6.2f}%, {hi:+6.2f}%]  "
               f"P(better)={np.mean(boots > 0):.2f}")
 
+    # check 3: this splits the test period in three so that we can see if the gain is stable over
+    # time
     df["year"] = pd.cut(df["origin"], 3, labels=["year 1", "year 2", "year 3"])
     by_year = df.pivot_table(index="year", columns="model", values="loss", aggfunc="mean", observed=True)
     skill = (1 - by_year.drop(columns="naive").div(by_year["naive"], axis=0)) * 100
     print("\n3. Skill vs random walk by test year (%)\n", skill.round(2))
 
+    # check 4: this counts how often actuals land in each zone so that we can see if the ranges are
+    # honest
     print("\n4. Calibration (ideal: 10% below p10, 50% below p50, 10% above p90, 80% inside)")
     for model in [m for m in ("hybrid", "tft", "arima", "naive") if m in set(df["model"])] or sorted(set(df["model"])):
         d = df[df["model"] == model]
@@ -119,6 +135,7 @@ def report(df: pd.DataFrame) -> None:
               f"above p90 {above90.mean() * 100:5.1f}%  inside 80% {inside.mean() * 100:5.1f}% "
               f"(CI {lo:.1f}-{hi:.1f})")
 
+    # check 5: this shows error by horizon so that we can confirm forecasts get worse further ahead
     best = pooled.drop(index="naive")["pinball"].idxmin() if len(pooled) > 1 else "naive"
     d = df[df["model"] == ("hybrid" if "hybrid" in pooled.index else best)]
     by_h = ((d["q50"] - d["actual"]).abs() / d["actual"] * 100).groupby(d["horizon"]).mean()
@@ -131,5 +148,6 @@ def main(run_id: int | None = None) -> None:
     report(df)
 
 
+# this takes an optional run id so that an older run can be checked too
 if __name__ == "__main__":
     main(int(sys.argv[1]) if len(sys.argv) > 1 else None)

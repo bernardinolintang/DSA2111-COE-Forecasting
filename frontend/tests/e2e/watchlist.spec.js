@@ -4,6 +4,7 @@
 
 import { expect, test } from "./fixtures.js";
 
+// this removes test targets so that runs do not affect each other
 async function cleanup(page, request) {
   const cid = await page.evaluate(() => JSON.parse(localStorage.getItem("coe-client-id")));
   if (!cid) return;
@@ -12,6 +13,7 @@ async function cleanup(page, request) {
   }
 }
 
+// this checks bad targets so that Add stays off and says why
 test("invalid targets keep Add disabled and explain why", async ({ page, request }) => {
   await page.goto("/#/alerts");
   const input = page.locator("#a-target");
@@ -36,6 +38,7 @@ test("invalid targets keep Add disabled and explain why", async ({ page, request
   await cleanup(page, request);
 });
 
+// this runs on each format so that normal ways of typing money all work
 for (const [typed, saved] of [["100000", "$100,000"], ["95,000", "$95,000"], ["$120,000", "$120,000"], ["88k", "$88,000"]]) {
   test(`"${typed}" is normalised and saved as ${saved}`, async ({ page, request }) => {
     await page.goto("/#/alerts");
@@ -52,6 +55,7 @@ for (const [typed, saved] of [["100000", "$100,000"], ["95,000", "$95,000"], ["$
   });
 }
 
+// this checks paste so that a copied amount with symbols works
 test("pasting a formatted amount works", async ({ page, request }) => {
   await page.goto("/#/alerts");
   await page.locator("#a-target").focus();
@@ -66,6 +70,7 @@ test("pasting a formatted amount works", async ({ page, request }) => {
   await cleanup(page, request);
 });
 
+// this checks duplicates so that both the form and API stop them
 test("duplicates are blocked in the form and by the API", async ({ page, request }) => {
   await page.goto("/#/alerts");
   await page.locator('[data-seg="a-cat"] button[data-value="B"]').click();
@@ -86,6 +91,7 @@ test("duplicates are blocked in the form and by the API", async ({ page, request
   await cleanup(page, request);
 });
 
+// this checks removal so that it asks before deleting
 test("removing a target asks for confirmation", async ({ page, request }) => {
   await page.goto("/#/alerts");
   await page.locator("#a-target").fill("99000");

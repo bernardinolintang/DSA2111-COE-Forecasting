@@ -24,6 +24,7 @@ from .. import repository as repo
 from .. import scenarios as sc
 from ..recommendation import Advice, advise, alert_outlook
 
+# these are the page names so that the analyst can say where the user is in plain words
 PAGES = {
     "overview": "Overview",
     "forecast": "Forecast",
@@ -35,9 +36,11 @@ PAGES = {
     "alerts": "Watchlist",
     "learn": "Learn",
 }
+# these are readable names for the effect types so that the analyst never quotes internal codes
 KIND = {"step": "Permanent shift", "pulse": "One-off shock", "temporary": "Temporary shift"}
 
 
+# this holds where the viewer is so that all the context can be built from it
 @dataclass
 class View:
     page: str = "overview"
@@ -53,6 +56,7 @@ class View:
         return sc.PCT_OF.get(self.scenario, 0) if self.quota_pct is None else self.quota_pct
 
 
+# this bundles everything the analyst may use so that tools and prompts read from the same numbers
 @dataclass
 class AnalystContext:
     """Everything the analyst may use, plus helpers for its data tools."""
@@ -70,16 +74,19 @@ class AnalystContext:
         return self.run is not None
 
 
+# this rounds a number and keeps None so that missing values do not crash the prompt
 def _r(v, digits=0):
     if v is None:
         return None
     return int(round(v)) if digits == 0 else round(float(v), digits)
 
 
+# this rounds a low and high pair so that ranges all look the same
 def _range(row, lo, hi):
     return [_r(row[lo]), _r(row[hi])]
 
 
+# this caches forecast rows on the context so that one question does not repeat a query
 def load_steps(conn: Connection, ctx: AnalystContext, category: str, scenario: str) -> list[dict]:
     key = (category, scenario)
     if key not in ctx.steps and ctx.run:
@@ -94,6 +101,7 @@ def steps_for_quota(conn: Connection, ctx: AnalystContext, category: str, pct: i
     return sc.steps_for(conn, ctx.run["id"], category, pct, load=lambda s: load_steps(conn, ctx, category, s))
 
 
+# this builds the outlook from cached rows so that the numbers match the Forecast page
 def recommendation_for(ctx: AnalystContext, category: str, steps: list[dict]) -> Advice:
     latest = ctx.latest[category]
     return advise(CATEGORIES[category]["name"], latest["premium"], steps, ctx.recent[category],
@@ -118,6 +126,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
     run = repo.latest_run(conn)
     ctx = AnalystContext(app_data={}, current_view={}, run=run, view=view)
 
+    # this loads recent results and base forecasts up front so that later steps use the cache
     for row in repo.latest_exercises(conn, n=48):
         ctx.recent.setdefault(row["category"], []).append(row)
     for code, rows in ctx.recent.items():
@@ -127,6 +136,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
         for row in repo.forecasts_all(conn, run["id"]):
             ctx.steps.setdefault((row["category"], "base"), []).append(row)
 
+    # this builds one entry per category so that the model can compare all five
     data_through = None
     categories = []
     for code, meta in CATEGORIES.items():
@@ -144,6 +154,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
                 "change_vs_previous_pct": _r((latest["premium"] / prev["premium"] - 1) * 100, 1) if prev else None,
             },
         }
+        # this adds forecast details only when they exist so that history still works without a run
         steps = ctx.steps.get((code, "base"))
         if steps:
             advice = recommendation_for(ctx, code, steps)
@@ -161,6 +172,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
                 f"{c}%_chance": _r(qt.quantile(values, c / 100)) for c in (50, 75, 90, 95)}
         categories.append(entry)
 
+    # this groups the Box-Tiao effects by event so that the model can quote them with their CIs
     events = []
     if run:
         effects = {}
@@ -178,6 +190,7 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
                 "description": ev["description"], "estimated_effects": effects.get(ev["code"], []),
             })
 
+    # this is the shared data block so that every viewer gets the same prompt until the next run
     ctx.app_data = {
         "as_of": {
             "data_through": data_through,
@@ -200,12 +213,14 @@ def build(conn: Connection, view: View, client_id: str | None) -> AnalystContext
     if not run:
         ctx.app_data["notice"] = "No forecasts yet: the ML pipeline has not finished a run."
 
+    # this loads the watchlist only for a known client so that nobody sees someone else's
     if client_id:
         ctx.alerts = repo.list_alerts(conn, client_id)
     ctx.current_view = _current_view(conn, ctx)
     return ctx
 
 
+# this sums up backtest accuracy so that the analyst can answer "how good is this model"
 def _model_summary(conn: Connection) -> dict | None:
     run = repo.latest_evaluated_run(conn)
     if not run:
@@ -226,6 +241,7 @@ def _model_summary(conn: Connection) -> dict | None:
     }
 
 
+# this describes what this viewer sees so that the analyst can answer "this page" questions
 def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
     v = ctx.view
     out: dict = {"page": PAGES.get(v.page, v.page)}
@@ -236,6 +252,7 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
     if v.page == "policy" and v.event:
         out["highlighted_event"] = v.event
 
+    # this adds the full forecast for the category on screen so that it can talk about what they see
     cat = v.category
     if cat and ctx.run and cat in ctx.latest:
         pct = v.pct if v.page == "scenario" else 0
@@ -254,6 +271,8 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
                     "market_reasons": advice.reasons,
                 },
             }
+            # this adds the gap from the announced forecast so that a scenario answer has a
+            # reference point
             if pct:
                 base = recommendation_for(ctx, cat, load_steps(conn, ctx, cat, "base"))
                 out["focus"]["vs_as_announced"] = {
@@ -261,6 +280,7 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
                     "difference": _r(advice.horizon_q50 - base.horizon_q50),
                     "interpolated": sc.scenario_id(pct) is None,
                 }
+        # this adds the bid being looked at so that it can talk about that exact number
         if v.page == "bid" and v.bid:
             base = load_steps(conn, ctx, cat, "base")
             if base:
@@ -271,6 +291,7 @@ def _current_view(conn: Connection, ctx: AnalystContext) -> dict:
                     "expected_premium_median": _r(nxt["q50"]),
                 }
 
+    # this scores each watchlist target so that the analyst can talk about them
     if ctx.alerts:
         out["watchlist"] = []
         for a in ctx.alerts:
@@ -293,11 +314,13 @@ def compact(app_data: dict, focus: str | None = None) -> dict:
     the figures), categories other than the one in view are summarised in one line,
     the leaderboard keeps our model, the random walk and the best, and policy effects
     become rows."""
+    # this drops the big sections first so that they can be rebuilt smaller below
     out = {k: v for k, v in app_data.items()
            if k not in ("categories", "policy_events", "supply_scenarios", "model_accuracy")}
     out["supply_scenarios"] = {s["id"]: s["label"] for s in app_data.get("supply_scenarios", [])}
     out["categories"] = []
     for c in app_data.get("categories", []):
+        # this keeps full detail only for the category in view so that the rest stays one line each
         rec = c.get("outlook")
         if focus and c["code"] != focus:
             brief = {"code": c["code"], "name": c["name"], "title": c["title"],
@@ -313,6 +336,8 @@ def compact(app_data: dict, focus: str | None = None) -> dict:
         out["categories"].append(c)
     if focus:
         out["categories_note"] = "Full detail for the category in view; the others are summarised."
+    # this keeps our model, the random walk and the best one so that the comparison survives in
+    # fewer tokens
     acc = app_data.get("model_accuracy")
     if acc:
         board = acc["leaderboard_by_pinball_loss"]
@@ -320,6 +345,7 @@ def compact(app_data: dict, focus: str | None = None) -> dict:
         keep |= {r["model"] for r in board if r["model"].startswith(("Hybrid", "Random walk"))}
         out["model_accuracy"] = {**acc, "models_compared": len(board),
                                  "leaderboard_by_pinball_loss": [r for r in board if r["model"] in keep]}
+    # this turns policy effects into rows with one column list so that the keys are not repeated
     out["policy_effect_columns"] = ["category", "effect_pct", "ci95_low_pct", "ci95_high_pct", "p_value", "significant"]
     out["policy_events"] = [
         {"code": ev["code"], "name": ev["name"], "effective": ev["effective"], "kind": ev["kind"],

@@ -6,6 +6,8 @@
 import { api } from "./api.js";
 import { ICONS, esc, html, raw } from "./util.js";
 
+// this keeps one loading promise so that many buttons share one request, a failure clears it so
+// that it can retry
 let termsPromise = null;
 export function loadGlossary() {
   termsPromise ||= api.get("/glossary")
@@ -20,6 +22,7 @@ export function explain(id, label) {
     aria-label="Explain: ${label}" title="What does this mean?">i</button>`;
 }
 
+// this sends a question to the analyst so that popovers can open the panel without importing it
 export function ask(question) {
   document.dispatchEvent(new CustomEvent("coe:ask", { detail: { question } }));
 }
@@ -27,9 +30,11 @@ export function ask(question) {
 // ---------------------------------------------------------------------------
 // Popover (one shared instance)
 // ---------------------------------------------------------------------------
+// this is the one shared popover and the button that opened it so that only one can show at a time
 let pop = null;
 let trigger = null;
 
+// this hides the popover, focus can go back so that keyboard users do not get lost
 function close(returnFocus = false) {
   if (!pop || pop.hidden) return;
   pop.hidden = true;
@@ -38,6 +43,7 @@ function close(returnFocus = false) {
   trigger = null;
 }
 
+// this places it under the button or above if there is no room so that it always stays on screen
 function position(btn) {
   const r = btn.getBoundingClientRect();
   const vw = document.documentElement.clientWidth;
@@ -50,6 +56,7 @@ function position(btn) {
   pop.style.top = `${top + window.scrollY}px`;
 }
 
+// this builds the popover on first use so that pages without one pay nothing
 async function open(btn) {
   if (!pop) {
     pop = document.createElement("div");
@@ -88,6 +95,7 @@ async function open(btn) {
   pop.querySelector(".pop-close").focus();
 }
 
+// this listens on the whole page so that buttons added later work with no extra wiring
 export function installExplain() {
   document.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-explain]");
@@ -101,14 +109,15 @@ export function installExplain() {
   });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(true); });
   window.addEventListener("resize", () => close());
-  // Close popovers left over from the previous page, but not one opened on the
-  // new page while it was still loading (its button is still on screen).
+  // this closes popovers left over from the previous page, but not one opened on the new page while
+  // it was still loading (its button is still on screen) so that the user does not lose it
   document.addEventListener("coe:routed", (e) => { if (e.detail?.inPlace || !trigger?.isConnected) close(); });
 }
 
 // ---------------------------------------------------------------------------
 // Full glossary dialog (Help menu)
 // ---------------------------------------------------------------------------
+// this reuses one dialog so that opening it twice does not stack them
 export async function openGlossaryDialog() {
   let dlg = document.getElementById("glossary-dialog");
   if (!dlg) {

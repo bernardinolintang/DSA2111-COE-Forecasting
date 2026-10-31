@@ -19,17 +19,21 @@
 import { DURATION, lerp, reducedMotion, tween } from "./motion.js";
 import { esc } from "./util.js";
 
+// this is the SVG namespace so that createElementNS makes real SVG elements
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // ---------------------------------------------------------------------------
 // Scales & ticks
 // ---------------------------------------------------------------------------
+// this maps data values to pixels so that every axis uses the same maths
 function linear(d0, d1, r0, r1) {
   const k = d1 === d0 ? 0 : (r1 - r0) / (d1 - d0);
   return (v) => r0 + (v - d0) * k;
 }
 
+// this picks round axis numbers so that the labels read like 100k and not 97,342
 export function niceTicks(min, max, count = 5) {
+  // this widens a flat range so that a constant series can still be drawn
   if (min === max) { min -= 1; max += 1; }
   const raw = (max - min) / count;
   const mag = 10 ** Math.floor(Math.log10(raw));
@@ -42,6 +46,7 @@ export function niceTicks(min, max, count = 5) {
   return { ticks, min: lo, max: hi };
 }
 
+// this picks year or month ticks by the span so that long charts do not get crowded
 function timeTicks(t0, t1, maxTicks) {
   const years = (t1 - t0) / (365.25 * 864e5);
   const ticks = [];
@@ -69,11 +74,13 @@ function timeTicks(t0, t1, maxTicks) {
   return ticks;
 }
 
+// this turns points into an SVG path so that lines and bands share one builder
 const path = (points) => points.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
 
 // ---------------------------------------------------------------------------
 // Tooltip (DOM, filled with textContent only)
 // ---------------------------------------------------------------------------
+// this makes the tooltip with textContent only so that data can never inject HTML
 function makeTooltip(container) {
   const tip = document.createElement("div");
   tip.className = "tooltip";
@@ -101,6 +108,7 @@ function makeTooltip(container) {
         r.append(key, value, label);
         tip.appendChild(r);
       }
+      // this flips the tooltip to the left near the edge so that it stays inside the chart
       const w = tip.offsetWidth || 180;
       const left = x + 16 + w > bounds ? x - w - 16 : x + 16;
       tip.style.left = `${Math.max(0, left)}px`;
@@ -111,6 +119,7 @@ function makeTooltip(container) {
   };
 }
 
+// this redraws on resize, once a frame so that a window drag stays smooth
 function observe(container, draw) {
   let frame;
   const ro = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => draw()); });
@@ -118,6 +127,7 @@ function observe(container, draw) {
   return () => { cancelAnimationFrame(frame); ro.disconnect(); };
 }
 
+// this writes a message into an empty chart so that a chart with no data is not blank
 function emptyState(svg, W, H, text) {
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("height", H);
@@ -132,6 +142,7 @@ function emptyState(svg, W, H, text) {
 // e.g. a longer history window or another category's bid grid). Ticks,
 // markers and regions that only exist on one side fade in or out.
 // ---------------------------------------------------------------------------
+// this counts charts so that each one gets its own clip path id
 let clipIds = 0;
 
 /** Values of a sorted [[x, ...values]] list at x (linear between points), or null outside it. */
@@ -152,6 +163,7 @@ export function sample(pts, x) {
   return a.slice(1).map((v, i) => v + (b[i + 1] - v) * k);
 }
 
+// this merges two sorted lists without repeats so that two x grids can be joined
 function mergeSorted(a, b) {
   const out = [];
   let i = 0;
@@ -170,7 +182,8 @@ export function mixPts(pa, pb, t) {
   if (pa.length === pb.length && pa.every((p, i) => p[0] === pb[i][0])) {
     return pb.map((p, i) => p.map((v, j) => (j === 0 ? v : lerp(pa[i][j], v, t))));
   }
-  // Different x grids: draw the union; a point only one side has keeps its own value.
+  // different x grids: this draws the union, a point only one side has keeps its own value so that
+  // nothing jumps
   return mergeSorted(pa.map((p) => p[0]), pb.map((p) => p[0])).map((x) => {
     const va = sample(pa, x);
     const vb = sample(pb, x);
@@ -181,6 +194,7 @@ export function mixPts(pa, pb, t) {
 }
 
 /** Items in both lists blend; items on one side fade out (A) or in (B). */
+// this blends list items by key so that ticks and markers can fade in and out
 function fadeUnion(listA, listB, key, t, merge) {
   const byKey = new Map(listA.map((a) => [key(a), a]));
   const seen = new Set();
@@ -194,6 +208,7 @@ function fadeUnion(listA, listB, key, t, merge) {
   return out;
 }
 
+// this mixes two frames at t so that every part of the chart moves together
 function mixFrames(A, B, t) {
   const same = (a, b) => b;
   return {
@@ -212,6 +227,7 @@ function mixFrames(A, B, t) {
   };
 }
 
+// this only writes an opacity when needed so that the SVG stays small
 const opacityAttr = (a) => (a < 0.995 ? ` opacity="${Math.max(0, a).toFixed(3)}"` : "");
 
 // ---------------------------------------------------------------------------
@@ -237,6 +253,7 @@ const opacityAttr = (a) => (a < 0.995 ? ` opacity="${Math.max(0, a).toFixed(3)}"
  * Returns { update(next, { animate, resetZoom }), setPoints(points), destroy() }.
  */
 export function lineChart(container, opts) {
+  // this holds the merged options so that update() can swap them
   let o;
   container.classList.add("chart");
   container.replaceChildren();
@@ -247,7 +264,9 @@ export function lineChart(container, opts) {
   const tip = makeTooltip(container);
   const clipId = `chart-clip-${++clipIds}`;
 
+  // this turns x into a number so that dates and plain numbers share the same code
   const toNum = (x) => (o.xType === "time" ? +x : x);
+  // these are the chart's live state so that redraws and hover can share it
   let xsAll = [];
   let lookup = [];
   let geometry = null;
@@ -258,6 +277,7 @@ export function lineChart(container, opts) {
   let view = null;             // zoomed-in x-range [x0, x1] (data units), or null for everything
   let zoomBar = null;
 
+  // this merges in the defaults and rebuilds the lookups so that hover stays fast
   function configure(next) {
     o = { height: 320, xType: "time", yFormat: String, xFormat: String, series: [], bands: [],
           markers: [], regions: [], points: [], xMarks: [], label: "Chart", emptyText: "No data to show", ...next };
@@ -286,7 +306,7 @@ export function lineChart(container, opts) {
       key: b.key, color: b.color, opacity: b.opacity ?? 0.14, a: 1,
       pts: b.points.filter((p) => p.lo != null && p.hi != null).map((p) => [toNum(p.x), p.lo, p.hi]),
     }));
-    // The y-axis fits what is in view, so zooming in shows real detail.
+    // the y-axis fits what is in view so that zooming in shows real detail
     const inView = (pts) => {
       if (!view) return pts.flatMap((p) => p.slice(1));
       const vals = pts.filter((p) => p[0] >= vx0 && p[0] <= vx1).flatMap((p) => p.slice(1));
@@ -315,6 +335,8 @@ export function lineChart(container, opts) {
     };
   }
 
+  // this draws highlighted points with optional guides so that a bid or value can be marked on the
+  // chart
   function pointsMarkup(points, { x, y, m, H }) {
     return points.map((p, i) => {
       const px = x(p.x).toFixed(1);
@@ -335,7 +357,9 @@ export function lineChart(container, opts) {
     const y = linear(F.yMin, F.yMax, H - m.bottom, m.top);
     geometry = { x, y, m, W, H };
 
+    // this clips the plot area so that zoomed lines do not spill over the axis
     const parts = [`<defs><clipPath id="${clipId}"><rect x="${m.left - 1}" y="0" width="${W - m.left + 1}" height="${H}"/></clipPath></defs>`];
+    // this draws gridlines and y labels so that values can be read off
     for (const t of F.yTicks) {
       if (t.a < 0.02) continue;
       const yy = Math.round(y(t.v)) + 0.5;
@@ -344,6 +368,7 @@ export function lineChart(container, opts) {
       parts.push(`<line class="gridline" x1="${m.left}" x2="${W - m.right}" y1="${yy}" y2="${yy}"${op}/>`);
       parts.push(`<text x="${m.left - 8}" y="${yy + 4}" text-anchor="end"${op}>${esc(o.yFormat(t.v))}</text>`);
     }
+    // this draws x labels so that the time axis can be read
     const xTicks = o.xType === "time"
       ? timeTicks(F.x0, F.x1, compact ? 4 : 8)
       : niceTicks(F.x0, F.x1, compact ? 4 : 6).ticks
@@ -352,12 +377,14 @@ export function lineChart(container, opts) {
       parts.push(`<text x="${x(t.value).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(t.label)}</text>`);
     }
     parts.push(`<line class="baseline" x1="${m.left}" x2="${W - m.right}" y1="${H - m.bottom + 0.5}" y2="${H - m.bottom + 0.5}"/>`);
-    // Subtle ticks on the baseline, one per forecast bidding exercise.
+    // subtle ticks on the baseline, one per forecast bidding exercise so that the exercise dates
+    // can be seen
     for (const xv of o.xMarks) {
       const tx = Math.round(x(toNum(xv))) + 0.5;
       if (tx >= m.left && tx <= W - m.right) parts.push(`<line class="x-mark" x1="${tx}" x2="${tx}" y1="${H - m.bottom - 5}" y2="${H - m.bottom}"/>`);
     }
 
+    // this draws regions, bands and the now line inside the clip so that they stay in the plot area
     parts.push(`<g clip-path="url(#${clipId})">`);
     for (const r of F.regions) {
       if (r.a < 0.02) continue;
@@ -377,9 +404,8 @@ export function lineChart(container, opts) {
       const fits = nx + 6 + String(F.nowLabel).length * 6.2 <= W - 2;
       parts.push(`<text x="${fits ? nx + 6 : nx - 6}" y="${m.top + 11}" class="marker-label"${fits ? "" : ' text-anchor="end"'}>${esc(F.nowLabel)}</text>`);
     }
-    // Marker labels go in two staggered rows; a label that would still collide is
-    // left out (the marker line stays, and the full list is shown beside the chart).
-    // The active marker is labelled first so it is never the one left out.
+    // marker labels go in two staggered rows, a label that would still collide is left out and the
+    // active marker is labelled first so that the chosen event is never the one dropped
     const rowEnds = [-Infinity, -Infinity];
     const ordered = [...F.markers].sort((a, b) => Number(b.active) - Number(a.active));
     for (const mk of ordered) {
@@ -397,6 +423,7 @@ export function lineChart(container, opts) {
         rowEnds[row] = left + labelW;
       }
     }
+    // this draws the lines after the bands so that they sit on top
     for (const s of F.series) {
       if (s.a < 0.02) continue;
       const pts = s.pts.map((p) => [x(p[0]), y(p[1])]);
@@ -412,6 +439,7 @@ export function lineChart(container, opts) {
     }
     parts.push(`<g class="pts">${pointsMarkup(F.points, geometry)}</g>`);
     parts.push("</g>");
+    // this adds the hover layer and a hit area so that the pointer works across the whole plot
     parts.push(`<g class="hover" style="display:none"><line class="crosshair" y1="${m.top}" y2="${H - m.bottom}"/>${
       o.series.map((s) => `<circle r="4.5" fill="${s.color}" class="hover-dot"/>`).join("")}</g>`);
     parts.push(`<rect class="hit" x="${m.left}" y="0" width="${W - m.left - m.right}" height="${H}"/>`);
@@ -422,6 +450,7 @@ export function lineChart(container, opts) {
     if (active >= 0) highlight(active);
   }
 
+  // this stops a running morph so that a new one can start cleanly
   function stopMorph() {
     anim?.handle.cancel();
     anim = null;
@@ -434,6 +463,8 @@ export function lineChart(container, opts) {
   function morphFrom(from, duration) {
     const W = container.clientWidth;
     stopMorph();
+    // this draws at once when a morph is not possible so that the chart always ends in the right
+    // state
     if (!from || !duration || !W || W !== drawnW || !xsAll.length || reducedMotion()) { draw(true); return; }
     const state = { from, to: targetFrame(W), t: 0 };
     anim = state;
@@ -444,6 +475,8 @@ export function lineChart(container, opts) {
     });
   }
 
+  // this draws for the current width, only when it changed so that a resize with no change costs
+  // nothing
   function draw(force = false) {
     const W = container.clientWidth;
     if (!W || (!force && W === drawnW)) return;
@@ -456,6 +489,7 @@ export function lineChart(container, opts) {
     render(shown, W);
   }
 
+  // this moves the crosshair and tooltip to one x so that one hover shows every series
   function highlight(i) {
     if (!geometry || i < 0) return;
     active = i;
@@ -477,6 +511,7 @@ export function lineChart(container, opts) {
     if (content) tip.show(content, x(xv), geometry.m.top, geometry.W);
   }
 
+  // this hides the hover layer so that it clears when the pointer leaves
   function clear() {
     active = -1;
     const g = svg.querySelector(".hover");
@@ -484,6 +519,7 @@ export function lineChart(container, opts) {
     tip.hide();
   }
 
+  // this finds the closest x with a binary search so that hover stays fast on long series
   function nearest(px) {
     const { x } = geometry;
     let lo = 0;
@@ -495,16 +531,19 @@ export function lineChart(container, opts) {
     return Math.abs(x(xsAll[lo]) - px) <= Math.abs(x(xsAll[hi]) - px) ? lo : hi;
   }
 
+  // this converts a pointer event into a chart index so that mouse and touch share one path
   const pointAt = (e) => {
     if (!geometry || !xsAll.length) return;
     const rect = svg.getBoundingClientRect();
     highlight(nearest((e.clientX - rect.left) * (geometry.W / rect.width)));
   };
   svg.addEventListener("pointermove", pointAt);
-  // Touch: a tap shows the values and they stay until you tap elsewhere (no hover on phones).
+  // touch: a tap shows the values and they stay until you tap elsewhere so that it works with no
+  // hover on phones
   svg.addEventListener("pointerdown", pointAt);
   svg.addEventListener("pointerleave", (e) => { if (e.pointerType !== "touch") clear(); });
   svg.addEventListener("blur", clear);
+  // this adds keyboard control so that the chart works without a mouse
   svg.addEventListener("keydown", (e) => {
     if (!geometry || !xsAll.length) return;
     if (zoomBar && ["+", "=", "-", "_", "0"].includes(e.key) && !e.ctrlKey && !e.metaKey) {
@@ -529,9 +568,9 @@ export function lineChart(container, opts) {
   });
 
   // ---- zoom (opt-in) --------------------------------------------------------
-  // Ctrl/⌘ + wheel, or a trackpad pinch (which browsers send as Ctrl + wheel),
-  // zooms around the pointer; plain scrolling still scrolls the page. Each step
-  // eases to the new range from wherever the previous one had got to.
+  // Ctrl/Cmd + wheel, or a trackpad pinch (which browsers send as Ctrl + wheel), zooms around the
+  // pointer while plain scrolling still scrolls the page. each step eases to the new range so that
+  // it feels smooth
   const extent = () => [xsAll[0], xsAll[xsAll.length - 1]];
 
   /** A valid zoom range: at least ~5 data steps wide, inside the data; null means everything. */
@@ -545,6 +584,7 @@ export function lineChart(container, opts) {
     return [lo, lo + span];
   }
 
+  // this updates the zoom buttons so that they match the current range
   function paintZoom() {
     container.classList.toggle("is-zoomed", Boolean(view));
     if (!zoomBar) return;
@@ -554,6 +594,7 @@ export function lineChart(container, opts) {
     if (o.focus) focus.textContent = o.focus.label || "Zoom in";
   }
 
+  // this animates to a new x range so that zooming is easy to follow
   function zoomTo(next, duration) {
     if (!next && !view) return;
     const from = currentFrame();
@@ -562,6 +603,7 @@ export function lineChart(container, opts) {
     morphFrom(from, duration);
   }
 
+  // this zooms on Ctrl + wheel so that normal scrolling is left alone
   svg.addEventListener("wheel", (e) => {
     if (!zoomBar || !(e.ctrlKey || e.metaKey) || !geometry || !xsAll.length) return;
     e.preventDefault();                                          // zoom the chart, not the page
@@ -575,7 +617,7 @@ export function lineChart(container, opts) {
     zoomTo(clampView(anchor - (anchor - a) * k, anchor + (b - anchor) * k), DURATION.micro);
   }, { passive: false });
 
-  // Drag to pan while zoomed (mouse only; on touch a drag keeps scrolling the page).
+  // drag to pan while zoomed, mouse only so that on touch a drag keeps scrolling the page
   let drag = null;
   svg.addEventListener("pointerdown", (e) => {
     if (!view || e.pointerType !== "mouse" || e.button !== 0 || !geometry) return;
@@ -595,9 +637,11 @@ export function lineChart(container, opts) {
   const endDrag = () => { drag = null; container.classList.remove("is-panning"); };
   svg.addEventListener("pointerup", endDrag);
   svg.addEventListener("pointercancel", endDrag);
+  // this resets the zoom on double click so that the full chart is one gesture away
   svg.addEventListener("dblclick", () => zoomTo(null, DURATION.route));
 
   configure(opts);
+  // this adds the zoom buttons only when asked so that small charts stay clean
   if (o.zoom) {
     const mod = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl";
     zoomBar = document.createElement("div");
@@ -616,6 +660,8 @@ export function lineChart(container, opts) {
     paintZoom();
   }
   draw(true);                                 // synchronous first paint
+  // this starts drawing on resize and returns the controls so that pages can update the chart in
+  // place
   const stop = observe(container, draw);
   return {
     /**
@@ -662,11 +708,13 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
   let shown = null;      // { yMax, ticks: [{v, a}], values: [] }
   let anim = null;
 
+  // this builds one frame for the bars so that they can be morphed like the line chart
   function frameFor(list) {
     const nice = niceTicks(0, Math.max(...list.map((d) => d.value)), 4);
     return { yMax: nice.max, ticks: nice.ticks.map((v) => ({ v, a: 1 })), values: list.map((d) => d.value) };
   }
 
+  // this draws the columns so that each bar has its own hover and focus target
   function render(F, W) {
     const m = { top: 12, right: 8, bottom: 26, left: 48 };
     const y = linear(0, F.yMax, height - m.bottom, m.top);
@@ -688,7 +736,7 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
       const r = Math.min(4, barW / 2, h);
       const x0 = cx - barW / 2;
       const base = height - m.bottom;
-      // Rounded data-end, square at the baseline.
+      // rounded data-end, square at the baseline so that bars follow the chart style
       const shape = `M${x0},${base}V${top + r}Q${x0},${top} ${x0 + r},${top}H${x0 + barW - r}Q${x0 + barW},${top} ${x0 + barW},${top + r}V${base}Z`;
       parts.push(`<path class="bar" data-i="${i}" tabindex="0" d="${shape}" fill="${d.color || color}"/>`);
       parts.push(`<rect class="hit" data-i="${i}" x="${m.left + band * i}" y="${m.top}" width="${band}" height="${height - m.top - m.bottom}" style="cursor:default"/>`);
@@ -705,6 +753,7 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
     svg.dataset.width = W;
   }
 
+  // this draws for the current width so that the bars fit the card
   function draw(force = false) {
     const W = container.clientWidth;
     if (!W || (!force && W === drawnW)) return;
@@ -718,6 +767,7 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
     render(shown, W);
   }
 
+  // this shows the tooltip for one bar so that mouse and keyboard use the same code
   function show(i) {
     const d = items[i];
     if (!d) return;
@@ -726,6 +776,7 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
     tip.show({ title: d.title || d.label, rows: [{ value: yFormat(d.value), label: d.seriesLabel || "", color: d.color || color }] },
       cx, 8, +svg.dataset.width);
   }
+  // this finds the bar under the pointer so that the tooltip follows it
   svg.addEventListener("pointermove", (e) => {
     const i = e.target.closest("[data-i]")?.dataset.i;
     if (i == null) tip.hide(); else show(+i);
@@ -767,6 +818,7 @@ export function columnChart(container, { items, height = 220, yFormat = String, 
 // ---------------------------------------------------------------------------
 // Sparkline: history in the accent, forecast median as a faded continuation
 // ---------------------------------------------------------------------------
+// this draws a small inline chart as a string so that cards can embed it directly
 export function sparkline(values, forecast = [], { width = 220, height = 44 } = {}) {
   const all = [...values, ...forecast];
   if (all.length < 2) return "";
@@ -774,6 +826,7 @@ export function sparkline(values, forecast = [], { width = 220, height = 44 } = 
   const max = Math.max(...all);
   const x = linear(0, all.length - 1, 2, width - 6);
   const y = linear(min, max === min ? min + 1 : max, height - 4, 4);
+  // this splits history and forecast so that the future part can be drawn fainter
   const hist = values.map((v, i) => [x(i), y(v)]);
   const fut = [hist[hist.length - 1], ...forecast.map((v, i) => [x(values.length + i), y(v)])];
   const [ex, ey] = hist[hist.length - 1];
@@ -788,6 +841,7 @@ export function sparkline(values, forecast = [], { width = 220, height = 44 } = 
 // Horizontal bar list (HTML): label · bar · value, sorted by the caller
 // ---------------------------------------------------------------------------
 /** rows: [{ label, value, display, color?, highlight? }] */
+// this scales each bar to the largest value so that rows can be compared at a glance
 export function barList(rows, { max } = {}) {
   const top = max ?? Math.max(...rows.map((r) => r.value), 1e-9);
   return `<div class="barlist" role="list">${rows.map((r) => `
@@ -800,6 +854,7 @@ export function barList(rows, { max } = {}) {
 }
 
 /** A simple accessible table, used as every chart's "table view". */
+// this builds a plain table so that the chart data is readable without the chart
 export function dataTable(columns, rows) {
   return `<div class="table-wrap"><table class="data"><thead><tr>${
     columns.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr></thead><tbody>${

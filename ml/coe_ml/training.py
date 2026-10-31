@@ -22,6 +22,7 @@ from .models import MODEL_CLASSES, quantile_loss
 from .parallel import parallel_map
 
 log = logging.getLogger(__name__)
+# this maps each category letter to a number so that the embedding layer can use it
 CATEGORY_INDEX = {c: i for i, c in enumerate(CATEGORIES)}
 
 
@@ -40,17 +41,21 @@ class Windows:
     category: np.ndarray      # [N]          category letter
     origin: np.ndarray        # [N]          time_idx of the forecast origin
 
+    # this returns the number of samples so that len(windows) works
     def __len__(self) -> int:
         return len(self.static)
 
+    # this keeps the samples in the mask so that windows can be split into train and validation
     def subset(self, mask: np.ndarray) -> "Windows":
         return Windows(*(getattr(self, f)[mask] for f in Windows.__dataclass_fields__))
 
+    # this joins several Windows into one so that each category can be built separately
     @staticmethod
     def concat(parts: list["Windows"]) -> "Windows":
         parts = [p for p in parts if len(p)]
         return Windows(*(np.concatenate([getattr(p, f) for p in parts]) for f in Windows.__dataclass_fields__))
 
+    # this converts the arrays to tensors, with NaN targets as 0, so that PyTorch can read them
     def tensors(self) -> tuple[torch.Tensor, ...]:
         return (torch.as_tensor(self.static, dtype=torch.long),
                 torch.as_tensor(self.enc, dtype=torch.float32),
@@ -72,17 +77,24 @@ def make_windows(panel: pd.DataFrame, L: int, H: int, origins: dict[str, list[in
         enc_all = grp[ENCODER_FEATURES].to_numpy(dtype=np.float32)
         dec_all = grp[DECODER_FEATURES].to_numpy(dtype=np.float32)
         target = grp["target"].to_numpy(dtype=np.float32)
+        # this maps time_idx to row position so that the arrays can be sliced quickly
         pos_of = {t: i for i, t in enumerate(grp["time_idx"])}
 
+        # this uses the requested origins or every origin so that training and forecasting share
+        # this code
         wanted = origins.get(cat, []) if origins is not None else grp["time_idx"].tolist()
         rows = []
         for t in wanted:
             pos = pos_of.get(t)
+            # this skips origins without a full window so that every sample has the same shape
             if pos is None or pos - L + 1 < 0 or pos + H >= len(grp):
                 continue
             y = target[pos + 1: pos + H + 1]
+            # this drops windows with missing answers when training so that the loss is never NaN
             if require_target and np.isnan(y).any():
                 continue
+            # this cuts the past L rows and the next H rows around the origin so that the encoder
+            # only gets the past
             rows.append((enc_all[pos - L + 1: pos + 1], dec_all[pos + 1: pos + H + 1], y, target[pos], t))
         if not rows:
             continue
@@ -92,6 +104,7 @@ def make_windows(panel: pd.DataFrame, L: int, H: int, origins: dict[str, list[in
     if not parts:
         raise ValueError("no windows could be built — check encoder length / horizon / origins")
     windows = Windows.concat(parts)
+    # this stops on NaN inputs so that bad features fail early and do not reach training
     if np.isnan(windows.enc).any() or np.isnan(windows.dec).any():
         raise ValueError("NaN in model inputs — feature preparation is incomplete")
     return windows
@@ -100,6 +113,7 @@ def make_windows(panel: pd.DataFrame, L: int, H: int, origins: dict[str, list[in
 # ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
+# this describes one model to train so that it can be sent to a worker process
 @dataclass
 class TrainJob:
     kind: str                         # "tft" or "lstm"
@@ -111,6 +125,7 @@ class TrainJob:
     threads: int = 1
 
 
+# this holds what comes back from training so that the weights reach the main process
 @dataclass
 class TrainResult:
     kind: str
@@ -119,6 +134,7 @@ class TrainResult:
     val_curve: list[float] = field(default_factory=list)
 
 
+# this builds a TFT or LSTM from the same settings so that both are created the same way
 def build_model(kind: str, cfg: TFTConfig) -> torch.nn.Module:
     return MODEL_CLASSES[kind](
         n_categories=len(CATEGORIES), n_encoder_vars=len(ENCODER_FEATURES),
@@ -140,6 +156,7 @@ def step_scale(windows: Windows) -> np.ndarray:
     return np.maximum((q90 - q10) / (2 * 1.2815515655446004), 1e-3).astype(np.float32)
 
 
+# this measures the loss with gradients off so that we can draw the validation curve
 def _evaluate_loss(model, windows: Windows, quantiles) -> float:
     model.eval()
     with torch.no_grad():
@@ -154,17 +171,22 @@ def train_model(job: TrainJob) -> TrainResult:
     trained during cross-validation and the final model trained on all data
     follow exactly the same recipe; only the epoch count is chosen by CV.
     """
+    # this fixes the threads and seeds so that a run can be repeated exactly
     torch.set_num_threads(job.threads)
     torch.manual_seed(job.seed)
     rng = np.random.default_rng(job.seed)
     cfg = job.cfg
 
     model = build_model(job.kind, cfg)
+    # this gives the head the usual move per horizon so that an untrained model starts as a
+    # calibrated random walk
     model.head.step_scale.copy_(torch.as_tensor(step_scale(job.train)))
     optimiser = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
     static, enc, dec, anchor, y = job.train.tensors()
 
     val_curve = []
+    # this trains in shuffled mini batches for a fixed number of epochs so that CV and the final
+    # model follow the same recipe
     for _ in range(job.epochs):
         model.train()
         order = rng.permutation(len(job.train))
@@ -174,11 +196,15 @@ def train_model(job: TrainJob) -> TrainResult:
                                  y[idx], cfg.quantiles)
             optimiser.zero_grad()
             loss.backward()
+            # this clips big gradients so that one bad batch cannot blow up the weights
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
             optimiser.step()
+        # this records the validation loss after each epoch so that cross-validation can pick the
+        # epoch count
         if job.val is not None:
             val_curve.append(_evaluate_loss(model, job.val, cfg.quantiles))
 
+    # this copies the weights into NumPy arrays so that they can travel back from the worker process
     weights = {name: tensor.detach().cpu().numpy() for name, tensor in model.state_dict().items()}
     return TrainResult(job.kind, job.seed, weights, val_curve)
 
@@ -202,6 +228,7 @@ class Ensemble:
     def predict(self, windows: Windows, interpret: bool = False) -> dict:
         preds, enc_w, dec_w, attn = [], [], [], []
         static, enc, dec, anchor, _ = windows.tensors()
+        # this runs every seed on the same windows so that their forecasts can be averaged
         for state in self.states:
             model = build_model(self.kind, self.cfg)
             model.load_state_dict({name: torch.as_tensor(array) for name, array in state.items()})
@@ -209,6 +236,8 @@ class Ensemble:
             with torch.no_grad():
                 out = model(static, enc, dec, anchor)
             preds.append(out["prediction"].numpy())
+            # this collects the weights and attention only when asked so that normal forecasting
+            # stays light
             if interpret and "attention" in out:
                 enc_w.append(out["encoder_weights"].numpy())
                 dec_w.append(out["decoder_weights"].numpy())

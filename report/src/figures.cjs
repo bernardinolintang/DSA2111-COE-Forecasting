@@ -12,23 +12,27 @@ const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 
+// these are the folders and a JSON loader so that each figure can read its data in one line
 const ROOT = path.join(__dirname, "..");
 const DATA = path.join(ROOT, "data");
 const OUT = path.join(ROOT, "figures");
 const load = (name) => JSON.parse(fs.readFileSync(path.join(DATA, name), "utf8"));
 
+// these are the IEEE widths, font and colours so that all figures match the paper
 const COL = 332, FULL = 685;
 const FONT = `"Times New Roman", Times, serif`;
 const INK = "#0b0b0b", INK2 = "#45443f", GRID = "#e4e3dd", AXIS = "#8f8d86", BAND = "#f1f0eb";
-// Categorical slots in fixed order (validated on a white surface with validate_palette.js).
+// these are the categorical colours in a fixed order so that each category keeps its colour
 const C = { blue: "#2a78d6", orange: "#eb6834", aqua: "#1baf7a", yellow: "#eda100", magenta: "#e87ba4" };
 
 // ---------------------------------------------------------------------------
 // SVG helpers
 // ---------------------------------------------------------------------------
+// this escapes text and rounds numbers so that the SVG stays valid and small
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const n = (v) => Number(v.toFixed(2));
 
+// this writes one SVG text element so that all labels share their defaults
 function text(x, y, str, o = {}) {
   const { anchor = "start", size = 10.5, fill = INK, weight = 400, italic = false, rotate } = o;
   const tf = rotate ? ` transform="rotate(${rotate} ${n(x)} ${n(y)})"` : "";
@@ -36,11 +40,13 @@ function text(x, y, str, o = {}) {
     `font-weight="${weight}"${italic ? ' font-style="italic"' : ""}${tf}>${esc(str)}</text>`;
 }
 /** Italic context-vector labels such as c_s: [["c", "s"], [", c", "c"]] -> c with subscript s, ... */
+// this writes text with subscripts so that terms like omega_k read properly
 function subText(x, y, parts, size = 9.5) {
   const spans = parts.map(([base, sub]) =>
     `<tspan>${esc(base)}</tspan><tspan dy="2.6" font-size="${size * 0.72}">${esc(sub)}</tspan><tspan dy="-2.6" font-size="1"> </tspan>`).join("");
   return `<text x="${n(x)}" y="${n(y)}" text-anchor="middle" font-size="${size}" fill="${INK2}" font-style="italic">${spans}</text>`;
 }
+// these are small SVG shape helpers so that the figures below stay readable
 const line = (x1, y1, x2, y2, stroke = AXIS, w = 1, extra = "") =>
   `<line x1="${n(x1)}" y1="${n(y1)}" x2="${n(x2)}" y2="${n(y2)}" stroke="${stroke}" stroke-width="${w}" ${extra}/>`;
 const rect = (x, y, w, h, fill, extra = "") =>
@@ -48,6 +54,7 @@ const rect = (x, y, w, h, fill, extra = "") =>
 const polyline = (pts, stroke, w = 2, extra = "") =>
   `<path d="M${pts.map(([x, y]) => `${n(x)},${n(y)}`).join("L")}" fill="none" stroke="${stroke}" ` +
   `stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round" ${extra}/>`;
+// this maps data to pixels so that every axis uses the same maths
 const scale = (d0, d1, r0, r1) => (v) => r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
 const svg = (w, h, body) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" ` +
@@ -57,6 +64,7 @@ const svg = (w, h, body) =>
   rect(0, 0, w, h, "#ffffff") + body + `</svg>`;
 
 /** Marker shapes give a second, colour-independent encoding for greyscale print. */
+// this draws a point marker so that series can be told apart without colour
 function marker(shape, x, y, fill, r = 3.4) {
   const ring = `stroke="#ffffff" stroke-width="1.5"`;
   if (shape === "square") return rect(x - r, y - r, 2 * r, 2 * r, fill, ring);
@@ -68,6 +76,7 @@ function marker(shape, x, y, fill, r = 3.4) {
 }
 
 /** A labelled box for the diagrams: bold title plus optional detail lines. */
+// this draws a labelled box so that the diagrams share one look
 function box(x, y, w, h, title, lines = [], o = {}) {
   const { fill = "#ffffff", stroke = INK2, titleSize = 10.5, lineSize = 9, align = "middle", italicLast = false } = o;
   const tx = align === "middle" ? x + w / 2 : x + 7;
@@ -81,6 +90,7 @@ function box(x, y, w, h, title, lines = [], o = {}) {
   });
   return out;
 }
+// this draws an arrow so that the diagrams can show the flow
 const arrow = (pts, extra = "") =>
   `<path d="M${pts.map(([x, y]) => `${n(x)},${n(y)}`).join("L")}" fill="none" stroke="${INK2}" stroke-width="1" ` +
   `marker-end="url(#arrow)" ${extra}/>`;
@@ -95,7 +105,8 @@ function figHistory() {
   const x = scale(2010, 2027, m.l, W - m.r), y = scale(0, 160000, H - m.b, m.t);
   let s = "";
 
-  // held-out test period (last 72 exercises)
+  // this shades the held-out test period (last 72 exercises) so that readers can see what the model
+  // never saw
   const histA = load("hist_A.json").points;
   const testStart = when(histA[histA.length - 72]);
   s += rect(x(testStart), m.t, x(when(histA[histA.length - 1])) - x(testStart) + 3, H - m.b - m.t, BAND);
@@ -112,7 +123,7 @@ function figHistory() {
   }
   s += text(m.l - 34, m.t - 20, "COE premium (S$)", { size: 10, fill: INK2 });
 
-  // policy events: hairline plus a numbered tag keyed to Table III
+  // policy events: a hairline plus a numbered tag keyed to Table III so that the chart stays clean
   const events = load("policy_events.json");
   const starts = { mas_loan_curbs_2013: 2013 + 2 / 12, cat_a_power_cap_2014: 2014 + 1 / 12, mas_loan_easing_2016: 2016 + 5 / 12,
     zero_growth_2018: 2018 + 1 / 12, covid_resumption_2020: 2020 + 6 / 12, ev_reclassification_2022: 2022 + 4 / 12,
@@ -128,7 +139,8 @@ function figHistory() {
     const pts = load(`hist_${cat}.json`).points.map((p) => [x(when(p)), y(p.premium)]);
     s += polyline(pts, colour, 1.5);
   }
-  // legend (five series, so identity is carried by the legend rather than end labels)
+  // this is the legend with five series so that identity is carried by the legend and not end
+  // labels
   let lx = m.l + 10;
   s += rect(lx - 5, m.t + 2, 5 * 58 + 2, 17, "#ffffff", `fill-opacity="0.92"`);
   for (const [cat, colour] of cats) {
@@ -142,11 +154,12 @@ function figHistory() {
 // ---------------------------------------------------------------------------
 // Fig. 2 - deployment architecture
 // ---------------------------------------------------------------------------
+// this draws the deployment diagram so that the report can show how the services fit together
 function figArchitecture() {
   const W = FULL, H = 252;
   const tint = "#f3f6fb", data = "#f6f5f0";
   let s = "";
-  // cluster boundary
+  // this draws the cluster boundary so that it is clear what runs inside Kubernetes
   s += rect(150, 8, 372, 236, "#fbfbf9", `rx="6" stroke="${AXIS}" stroke-width="0.9"`);
   s += text(160, 23, "Docker Compose (laptop)  /  MicroK8s namespace coe-g7 (Ronin cloud VM)", { size: 9.5, fill: INK2, italic: true });
 
@@ -182,6 +195,7 @@ function figArchitecture() {
 // ---------------------------------------------------------------------------
 // Fig. 3 - ML pipeline
 // ---------------------------------------------------------------------------
+// this draws the ML pipeline so that the report can show each stage in order
 function figPipeline() {
   const W = COL, bh = 29, gap = 7, bw = 316, x0 = 8;
   const steps = [
@@ -209,6 +223,7 @@ function figPipeline() {
 // ---------------------------------------------------------------------------
 // Fig. 4 - TFT architecture as implemented
 // ---------------------------------------------------------------------------
+// this draws the TFT as we built it so that the report can explain each block
 function figTft() {
   const W = COL, H = 348;
   const mx = 104, mw = 222;           // main column
@@ -246,7 +261,7 @@ function figTft() {
   s += arrow([[px + pw / 2, 314], [px + pw / 2, 301]]);
   s += arrow([[fx + fw / 2, 314], [fx + fw / 2, 301]]);
 
-  // static branch
+  // this is the static branch so that the category context feeds into the layers
   s += box(6, 314, 74, 30, "Static", ["category"], { fill: data, titleSize: 10, lineSize: 9 });
   s += box(6, 264, 74, 38, "Static", ["encoders", "(4 GRNs)"], { fill: tint, titleSize: 10, lineSize: 9 });
   s += arrow([[43, 314], [43, 303]]);
@@ -263,6 +278,7 @@ function figTft() {
 // ---------------------------------------------------------------------------
 // Fig. 5 - user interface (two screenshots side by side)
 // ---------------------------------------------------------------------------
+// this places both screenshots side by side so that the UI figure fits one row
 function figUi() {
   const W = FULL, iw = 338, ih = Math.round(iw * 700 / 900), gap = W - 2 * iw, H = ih + 18;
   const uri = (f) => "data:image/png;base64," + fs.readFileSync(path.join(OUT, f)).toString("base64");
@@ -279,6 +295,7 @@ function figUi() {
 // ---------------------------------------------------------------------------
 // Fig. 6 - cross-validated learning curves
 // ---------------------------------------------------------------------------
+// this draws the learning curves so that the report can show how the epoch count was picked
 function figCv() {
   const W = COL, H = 208, m = { l: 40, r: 76, t: 22, b: 32 };
   const curves = load("model_metrics.json").run.metrics.cv_curves;
@@ -310,6 +327,7 @@ function figCv() {
 // ---------------------------------------------------------------------------
 // Fig. 7 - pinball skill against the random walk, by horizon
 // ---------------------------------------------------------------------------
+// this draws skill against the random walk so that the report can show the gain per horizon
 function figSkill() {
   const W = COL, H = 214, m = { l: 34, r: 104, t: 22, b: 32 };
   const rows = load("model_metrics.json").by_horizon;
@@ -331,7 +349,8 @@ function figSkill() {
   s += text((m.l + W - m.r) / 2, H - 3, "Forecast horizon (exercises ahead)", { anchor: "middle", size: 10, fill: INK2 });
   s += text(m.l - 28, m.t - 10, "Pinball-loss improvement over random walk (%)", { size: 10, fill: INK2 });
 
-  // end labels, nudged apart where two series finish within a line of text
+  // end labels, nudged apart where two series finish within a line of text so that they do not
+  // overlap
   const ends = series.map(([key, label, colour, shape, w]) => ({ key, label, colour, shape, w, vals: skill(key) }));
   const labelY = ends.map((e) => y(e.vals[5]));
   labelY.push(y(0));
@@ -351,6 +370,7 @@ function figSkill() {
 // ---------------------------------------------------------------------------
 // Fig. 8 - out-of-sample forecasts against outcomes (Cat A)
 // ---------------------------------------------------------------------------
+// this draws forecasts against actuals so that the report can show one step and six steps ahead
 function figBacktest() {
   const W = FULL, H = 226, m = { l: 40, r: 8, t: 38, b: 24 }, gap = 22;
   const pw = (W - m.l - m.r - gap) / 2;
@@ -376,7 +396,7 @@ function figBacktest() {
     s += text(x0, m.t - 8, title, { size: 10.5, weight: 700 });
   });
   s += text(m.l - 34, 11, "Cat A premium (S$)", { size: 10, fill: INK2 });
-  // legend
+  // this is the legend so that the line and band can be identified
   let lx = W - 372;
   s += line(lx, 8, lx + 18, 8, INK, 1.3); s += text(lx + 23, 11.5, "Actual premium", { size: 10 }); lx += 104;
   s += line(lx, 8, lx + 18, 8, C.blue, 1.8); s += text(lx + 23, 11.5, "Median forecast", { size: 10 }); lx += 106;
@@ -387,6 +407,7 @@ function figBacktest() {
 // ---------------------------------------------------------------------------
 // Fig. 9 - TFT variable-selection weights
 // ---------------------------------------------------------------------------
+// this draws the variable weights so that the report can show what the TFT looks at
 function figImportance() {
   const W = COL, top = 6, rowH = 15, labelW = 128;
   const data = load("model_interpretability.json");
@@ -411,6 +432,7 @@ function figImportance() {
 }
 
 // ---------------------------------------------------------------------------
+// this renders each figure in Chrome so that the PNGs come out sharp enough for print
 (async () => {
   const only = process.argv.slice(2);
   const figures = [figHistory, figArchitecture, figPipeline, figTft, figUi, figCv, figSkill, figBacktest, figImportance]

@@ -2,12 +2,14 @@
 
 import { expect, test } from "./fixtures.js";
 
+// this clears the seen flag so that the tests start like a first visit
 test.use({ tourSeen: false });
 
 const TITLES = ["Today's market", "Read a forecast", "Test supply scenarios", "Plan a bid",
                 "Understand why", "Why trust the model?", "Watch a target"];
 const HASHES = [/:\d+\/(#\/)?$/, /#\/forecast\/A/, /#\/scenario\/A/, /#\/bid\/A/, /#\/policy\/B/, /#\/model/, /#\/alerts/];
 
+// this checks the first visit so that the tour is offered and not forced
 test("first visit offers the tour without forcing it; Not now remembers", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".tour-offer")).toContainText("New to COE Compass?");
@@ -18,6 +20,7 @@ test("first visit offers the tour without forcing it; Not now remembers", async 
   await expect(page.locator(".tour-offer")).toHaveCount(0);
 });
 
+// this walks all 7 steps so that Back, Next and each page work
 test("complete the tour: 7 steps across the app with Back and Next", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Take the tour" }).click();
@@ -40,6 +43,7 @@ test("complete the tour: 7 steps across the app with Back and Next", async ({ pa
   expect(await page.evaluate(() => localStorage.getItem("coe-tour-seen"))).toBe("true");
 });
 
+// this checks skip and reopen so that the tour is easy to leave and find again
 test("skip with the button or Escape, then reopen from Help", async ({ page }) => {
   await page.goto("/#/forecast/A");
   await page.getByRole("button", { name: "Take the tour" }).click();
@@ -53,6 +57,7 @@ test("skip with the button or Escape, then reopen from Help", async ({ page }) =
   await expect(page.locator(".tour-card")).toHaveCount(0);
 });
 
+// this checks the final step so that it hands over to the analyst
 test("the last step hands over to the analyst", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Take the tour" }).click();

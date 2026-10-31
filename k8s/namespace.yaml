@@ -1,3 +1,4 @@
+# this is the group's own namespace so that our objects stay apart from other groups
 apiVersion: v1
 kind: Namespace
 metadata:

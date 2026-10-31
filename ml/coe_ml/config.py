@@ -14,24 +14,28 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Paths and connections
 # ---------------------------------------------------------------------------
+# this finds the folders relative to this file so that paths work on a laptop and in docker
 PACKAGE_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.getenv("COE_DATA_DIR", PACKAGE_DIR.parent / "data"))
 SNAPSHOT_DIR = DATA_DIR / "snapshot"      # committed copy of the raw data (offline fallback)
 ARTIFACT_DIR = DATA_DIR / "artifacts"     # trained weights, plots, etc. (not committed)
 
+# this is the database address, the default matches docker compose so that no .env is needed
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+psycopg://coe:coe_password@localhost:5432/coe"
 )
 
-# Optional: data.gov.sg issues API keys for higher rate limits. The public
-# endpoint works without one, so this is never required.
+# this optional key gives higher rate limits on data.gov.sg, the public endpoint works without it so
+# that nobody needs a key to run the project
 DATAGOV_API_KEY = os.getenv("DATAGOV_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Domain constants
 # ---------------------------------------------------------------------------
+# this is the list of COE categories so that every stage loops over them in the same order
 CATEGORIES = ["A", "B", "C", "D", "E"]
 
+# this holds the official name of each category so that the wording lives in one place
 CATEGORY_NAMES = {
     "A": "Cars up to 1,600cc & 97kW (EVs up to 110kW)",
     "B": "Cars above 1,600cc or 97kW (EVs above 110kW)",
@@ -40,17 +44,19 @@ CATEGORY_NAMES = {
     "E": "Open (any vehicle except motorcycles)",
 }
 
-# Exercises per year: bidding happens twice a month.
+# this counts exercises in a year (bidding is twice a month) so that lags like 10 years can be
+# written in exercises
 EXERCISES_PER_YEAR = 24
 
-# Quantiles predicted by every probabilistic model. 0.1 / 0.5 / 0.9 are the
-# p10 / p50 / p90 bounds promised in the proposal; the extra levels let the
-# bid planner interpolate a smooth win-probability curve.
+# these are the quantiles every probabilistic model predicts. 0.1, 0.5 and 0.9 are the p10, p50 and
+# p90 promised in the proposal, the extra levels are there so that the bid planner can draw a smooth
+# win-probability curve
 QUANTILES = [0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95]
+# this stores where the median sits in the list so that code can pick it out by position
 MEDIAN_INDEX = QUANTILES.index(0.50)
 
-# What-if supply scenarios: multiplier applied to the quota of the *next*
-# (not yet announced) quota quarter.
+# these are the what-if supply scenarios, each number multiplies the quota of the next quarter (not
+# announced yet) so that we can show how premiums react to more or less supply
 SCENARIOS = {
     "base": 1.00,
     "quota_minus_20": 0.80,
@@ -63,6 +69,7 @@ SCENARIOS = {
 # ---------------------------------------------------------------------------
 # Model hyper-parameters
 # ---------------------------------------------------------------------------
+# this groups the TFT settings so that one object can be passed around and saved with each run
 @dataclass
 class TFTConfig:
     """Hyper-parameters for the Temporal Fusion Transformer (tuned with scripts/tune.py)."""
@@ -82,6 +89,7 @@ class TFTConfig:
     quantiles: list[float] = field(default_factory=lambda: list(QUANTILES))
 
 
+# this groups the backtest settings so that the evaluation can be changed in one place
 @dataclass
 class BacktestConfig:
     """Rolling-origin evaluation settings (see evaluation.py)."""
@@ -93,18 +101,21 @@ class BacktestConfig:
     select_epochs: bool = True        # False: use TFTConfig.default_epochs
 
 
+# this bundles all the settings so that the pipeline only needs one config object
 @dataclass
 class PipelineConfig:
     tft: TFTConfig = field(default_factory=TFTConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
-    # Worker processes for the embarrassingly-parallel parts of the pipeline
-    # (one Box-Tiao / ARIMA fit per category, one model per training job).
+    # this is the number of worker processes for the parallel parts (one Box-Tiao or ARIMA fit per
+    # category, one model per training job) so that the job can use several CPU cores
     n_workers: int = int(os.getenv("COE_WORKERS", max(1, min(5, (os.cpu_count() or 2) - 1))))
-    # Size of a drop the proposal treats as meaningful (8%). Recorded with each run;
-    # the API uses it for the outlook's "chance of a drop of 8% or more".
+    # this is the drop the proposal treats as meaningful (8%), it is saved with each run so that the
+    # API can show the outlook's "chance of a drop of 8% or more"
     wait_threshold: float = 0.08
 
 
+# this gives a cheaper setup with fewer epochs and forecast origins so that smoke tests finish
+# quickly
 def fast_config() -> PipelineConfig:
     """A much cheaper configuration for smoke tests and CI."""
     cfg = PipelineConfig()

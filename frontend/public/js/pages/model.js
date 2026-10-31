@@ -10,20 +10,24 @@ import {
   CATEGORY_CODES, errorBox, exerciseDate, html, money, moneyShort, mount, onSegment, pct, provenance, raw, segmented, timeAgo,
 } from "../util.js";
 
-// Fixed identity colours for the three models compared by horizon.
+// these are fixed colours for the three models compared by horizon so that each keeps its colour
+// across charts
 const OURS = "hybrid";
 const HORIZON_SERIES = [
   { model: "hybrid", color: "var(--cat-A)" },
   { model: "tft", color: "var(--cat-B)" },
   { model: "naive", color: "var(--cat-C)" },
 ];
+// this is how long a run can stay "running" so that an interrupted run is not shown as still going
 const STALE_RUN_MS = 3 * 3600 * 1000;      // a "running" run older than this was interrupted
 
+// this labels a run so that an old stuck run shows up as interrupted
 function runStatus(r) {
   if (r.status === "running" && Date.now() - new Date(r.created_at).getTime() > STALE_RUN_MS) return "interrupted";
   return r.status;
 }
 
+// this builds the plain summary so that a non-technical visitor gets the result first
 function trustSummary(board, byH, dm) {
   const ours = board.find((r) => r.model === OURS);
   const naive = board.find((r) => r.model === "naive");
@@ -57,6 +61,7 @@ function trustSummary(board, byH, dm) {
     <p class="small muted mt-16">${vsNaive}</p>`;
 }
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root, { query = {} } = {}) {
   mount(root, html`
     <section class="container page-head page-enter">
@@ -75,6 +80,7 @@ export async function render(root, { query = {} } = {}) {
     mount(root.querySelector("#model-body"), errorBox(err));
     return undefined;
   }
+  // these pull out what the page needs so that the markup below stays short
   const charts = [];
   const runMetrics = metrics.run.metrics || {};
   const dm = runMetrics.diebold_mariano || {};
@@ -170,9 +176,11 @@ export async function render(root, { query = {} } = {}) {
     </details>`);
 
   const details = root.querySelector("#technical");
+  // this draws the technical charts when opened so that they get a real width
   details.addEventListener("toggle", () => {
     replaceHash(details.open ? "#/model?section=technical" : "#/model");
   });
+  // this tells the analyst what is on screen so that its answers match the page
   setView({ facts: ours ? [
     { label: "Model", value: "Hybrid: TFT + Box-Tiao ARIMAX" },
     { label: "Typical error (MAPE)", value: pct(ours.mape, { sign: false }) },
@@ -180,6 +188,7 @@ export async function render(root, { query = {} } = {}) {
   ] : [] });
 
   // ---- error by horizon ----
+  // this reads the rows per horizon so that the error chart can show how accuracy falls with time
   const byH = metrics.by_horizon;
   charts.push(lineChart(root.querySelector("#by-horizon"), {
     xType: "linear", height: 260, label: "MAPE by forecast horizon",
@@ -198,6 +207,8 @@ export async function render(root, { query = {} } = {}) {
   const bt = { cat: "A", h: "1" };
   let btChart = null;
   let latestBt = 0;
+  // this draws predicted against actual, the token drops old replies so that a slow response cannot
+  // replace a newer one
   async function drawBacktest({ animate = false } = {}) {
     const token = ++latestBt;
     const { cat, h } = bt;
@@ -233,13 +244,14 @@ export async function render(root, { query = {} } = {}) {
     if (btChart) btChart.update(opts, { animate });
     else btChart = lineChart(root.querySelector("#backtest"), opts);
   }
-  // Switching category or horizon morphs the lines rather than redrawing them.
+  // switching category or horizon morphs the lines so that the change is easy to follow
   onSegment(root, "bt-cat", (c) => { bt.cat = c; drawBacktest({ animate: true }); });
   onSegment(root, "bt-h", (h) => { bt.h = h; drawBacktest({ animate: true }); });
   await drawBacktest();
 
   // ---- interpretability ----
   let firstImportance = true;
+  // this draws the top 10 inputs so that the chart stays readable
   function drawImportance(component) {
     const rows = [...(interp[component] || [])].sort((a, b) => b.importance - a.importance).slice(0, 10);
     const box = root.querySelector("#importance");
@@ -249,6 +261,7 @@ export async function render(root, { query = {} } = {}) {
     firstImportance = false;
   }
   let attChart;
+  // this draws attention by lag so that we can see which past exercises mattered
   function drawAttention(cat) {
     const rows = (interp.attention[cat] || []).slice().sort((a, b) => a.lag - b.lag);
     const items = rows.map((r) => ({ label: r.lag % 3 === 0 || r.lag === 1 ? String(r.lag) : "", title: `${r.lag} exercise${r.lag > 1 ? "s" : ""} back`,
@@ -263,5 +276,6 @@ export async function render(root, { query = {} } = {}) {
   drawImportance("encoder");
   drawAttention("A");
 
+  // this removes the charts when leaving so that observers stop
   return () => [...charts, btChart, attChart].forEach((c) => c?.destroy());
 }

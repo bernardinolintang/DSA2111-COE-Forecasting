@@ -22,9 +22,12 @@ import {
   CATEGORY_CODES, errorBox, forecastId, html, money, moneyShort, mount, onSegment, parseMoney, provenance, segmented,
 } from "../util.js";
 
+// this is the highest bid allowed so that typing cannot go past the API limit
 const MAX_BID = 999_999;
+// this shows extreme chances as >99 or <1 so that the page never promises certainty
 const shownProb = (p) => (p > 99.5 ? ">99" : p < 0.5 ? "<1" : String(Math.round(p)));
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root, { category = "A", query = {} } = {}, page = {}) {
   const categories = await api.get("/categories");
   const state = { category: CATEGORY_CODES.includes(category) ? category : "A" };
@@ -46,6 +49,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       </div>
     </section>`);
   const planner = root.querySelector("#planner");
+  // this sets which button looks pressed so that a change from anywhere moves the selection
   const press = (value) => root.querySelectorAll('[data-seg="cat"] button')
     .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === value)));
   onSegment(root, "cat", (c) => { location.hash = buildHash({ page: "bid", category: c }); });
@@ -55,7 +59,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
   });
   setView({ category: state.category });
 
-  // ---- planner state ----
+  // these are the planner's values so that all the functions below can share them
   let plan = null;
   let summary = null;            // for the forecast details line (model run, data through)
   let curve = [];
@@ -68,9 +72,11 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
   let glide = null;
   let hashTimer;
   let loadToken = 0;
+  // these read the curve and keep bids in range so that the marker stays on the chart
   const prob = (bid) => winProbability(curve, bid);
   const clamp = (bid) => Math.max(lo, Math.min(hi, bid));
 
+  // this builds the planner once so that later changes only update values
   function build() {
     mount(planner, html`
       <div class="card card-lg">
@@ -106,6 +112,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
             chips: $("#bid-chips"), cdfSub: $("#cdf-sub"), cdf: $("#cdf"), explain: $("#bid-explain"),
             ladder: $("#bid-ladder"), provenance: $("#bid-provenance") };
 
+    // these connect the slider and the text box so that both stay in step
     els.range.addEventListener("input", () => set(+els.range.value, { duration: DURATION.micro }));
     els.input.addEventListener("input", () => {
       const r = parseMoney(els.input.value, { min: 1, max: MAX_BID, what: "a bid" });
@@ -117,10 +124,12 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       if (r.ok) set(r.value);
       else { showError(r.error); if (current != null && r.empty) set(current); }
     });
+    // this applies a suggested bid so that one click tries it
     els.chips.addEventListener("click", (e) => {
       const b = e.target.closest("[data-bid]");
       if (b) set(+b.dataset.bid);
     });
+    // this applies a bid from the ladder so that nearby bids are one click away
     els.ladder.addEventListener("click", (e) => {
       const b = e.target.closest("[data-ladder]");
       if (b) set(+b.dataset.ladder);
@@ -129,8 +138,8 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
 
   /** "$98,000 → 41%": the chance at round bids either side of the current one. */
   function paintLadder(bid) {
-    // Only redrawn when it changes: leaving the text box re-applies the same bid, and
-    // replacing the rows then would swallow a click on one of them.
+    // this is only redrawn when it changes since leaving the text box re-applies the same bid, so
+    // that replacing the rows does not swallow a click on one of them
     const key = `${state.category}|${plan.exercise.label}|${bid}`;
     if (els.ladder.dataset.key === key) return;
     els.ladder.dataset.key = key;
@@ -143,6 +152,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       </button>`)}`);
   }
 
+  // this builds the marker point so that the chart can show where the bid sits
   const marker = (bid) => [{ x: clamp(bid), y: prob(clamp(bid)), color: "var(--accent)", guides: true }];
 
   /** Move the chart marker along the curve to `bid` (instantly on first draw or with reduced motion). */
@@ -182,6 +192,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     ] });
   }
 
+  // this shows an error in the planner so that the page is not blank
   function showError(message) {
     els.error.hidden = !message;
     els.error.textContent = message || "";
@@ -217,7 +228,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     const bid = Math.round(initial.ok ? initial.value : plan.bid);
     const series = [{ key: "p", label: "Win probability", color: "var(--accent)", points: curve.map((p) => ({ x: p.bid, y: p.probability_pct })) }];
     if (!chart) {
-      // One chart for the page's lifetime: moving the bid only moves the marker.
+      // this keeps one chart for the page's lifetime so that moving the bid only moves the marker
       chart = lineChart(els.cdf, {
         xType: "linear", height: 280, label: "Win probability by bid", series, points: [],
         yFormat: (v) => `${Math.round(v)}%`, xFormat: moneyShort, yDomain: [0, 100],
@@ -225,7 +236,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       });
       set(bid, { animate: false });
     } else {
-      // New category: the curve and its marker morph together.
+      // new category: the curve and its marker morph together so that the change is easy to follow
       glide?.cancel();
       markerAt = bid;
       chart.update({ series, points: marker(bid) }, { animate: true, duration: DURATION.route });
@@ -233,6 +244,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     }
   }
 
+  // this loads the plan for the category so that a late response cannot replace a newer one
   async function load(bidQuery) {
     const token = ++loadToken;
     const cat = state.category;
@@ -260,6 +272,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     planner.classList.remove("is-loading");
   }
 
+  // this changes category or bid in place so that the page does not fully reload
   page.navigate = ({ category: c, query: q = {} }) => {
     const next = CATEGORY_CODES.includes(c) ? c : "A";
     press(next);
@@ -273,8 +286,10 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     load(q.bid);
     return true;
   };
+  // this lets the analyst set the bid so that it can show an answer on the page
   setPageActions({ setBid: (amount) => { if (els) set(amount); } });
 
   await load(query.bid);
+  // this cleans up when leaving so that timers and the chart stop
   return () => { clearTimeout(hashTimer); glide?.cancel(); chart?.destroy(); };
 }

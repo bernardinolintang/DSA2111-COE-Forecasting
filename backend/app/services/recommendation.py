@@ -34,6 +34,7 @@ from . import quantiles as qt
 CLEAR, SLIGHT = 0.65, 0.55         # how far the odds must lean before a direction is called
 LOW_WIDTH, MODERATE_WIDTH = 8.0, 15.0     # half-width of the 80% range, % of today's premium
 
+# this maps each outlook code to its wording so that all pages describe it the same way
 OUTLOOKS = {
     "easing": {"label": "Downward pressure", "direction": "down", "strength": "strong"},
     "softer": {"label": "Slight downward pressure", "direction": "down", "strength": "slight"},
@@ -43,6 +44,7 @@ OUTLOOKS = {
 }
 
 
+# this holds everything the outlook needs so that routers can send it straight to the API
 @dataclass
 class Advice:
     outlook: str                # "easing" | "softer" | "steady" | "firmer" | "rising"
@@ -73,6 +75,8 @@ class Advice:
     reasons: list[str]
 
 
+# this turns the chance of a lower premium into one of five outlooks so that small leans stay "No
+# clear direction"
 def outlook_for(prob_lower: float) -> str:
     prob_higher = 1.0 - prob_lower
     if prob_lower >= CLEAR:
@@ -86,6 +90,7 @@ def outlook_for(prob_lower: float) -> str:
     return "steady"
 
 
+# this turns the width of the range into a word so that the page can say how sure the model is
 def uncertainty_for(width_pct: float) -> str:
     return "low" if width_pct < LOW_WIDTH else "moderate" if width_pct <= MODERATE_WIDTH else "high"
 
@@ -93,6 +98,7 @@ def uncertainty_for(width_pct: float) -> str:
 def advise(category_name: str, current: float, steps: list[dict], history: list[dict],
            threshold: float) -> Advice:
     """``steps``: forecast rows ordered by step; ``history``: recent exercises, oldest first."""
+    # this reads the odds from the last forecast step so that the outlook covers one quota quarter
     nxt, end = steps[0], steps[-1]
     end_values = qt.row_values(end)
     change = end["q50"] / current - 1.0
@@ -101,14 +107,17 @@ def advise(category_name: str, current: float, steps: list[dict], history: list[
     prob_drop = qt.cdf(end_values, current * (1.0 - threshold))
     cheapest = min(steps, key=lambda s: s["q50"])
     horizon_label = exercise_label(end["month"], end["bidding_no"])
+    # this works out half the range as a percent of today so that uncertainty is easy to compare
     width = (end["q90"] - end["q10"]) / current * 50
 
     level = outlook_for(prob_lower)
+    # this writes the median sentence first so that each outlook below can reuse it
     if abs(change) < 0.005:
         median = f"the most likely premium by {horizon_label} is about the same as today"
     else:
         median = (f"the most likely premium by {horizon_label} is {abs(change) * 100:.1f}% "
                   f"{'lower' if change < 0 else 'higher'} than today")
+    # this picks the wording for each outlook so that the summary reads like a person wrote it
     if level == "easing":
         lead = (f"{category_name} premiums are more likely to fall than rise: {median}, with a "
                 f"{prob_lower * 100:.0f}% chance of a lower premium.")
@@ -149,7 +158,9 @@ def market_drivers(current: float, steps: list[dict], history: list[dict]) -> li
     number behind it and a plain-English sentence.
     """
     drivers = []
+    # this needs a year of history so that demand and quota can be compared with last year
     if len(history) >= 24:
+        # this compares bids per COE now with the past year so that we can say if demand is hot
         ratio_now = history[-1]["bids_received"] / max(history[-1]["quota"], 1)
         ratio_avg = sum(h["bids_received"] / max(h["quota"], 1) for h in history[-24:]) / 24
         trend = "up" if ratio_now > ratio_avg * 1.05 else "down" if ratio_now < ratio_avg * 0.95 else "flat"
@@ -157,6 +168,7 @@ def market_drivers(current: float, steps: list[dict], history: list[dict]) -> li
         drivers.append({"key": "demand", "title": "Demand pressure", "trend": trend, "value": round(ratio_now, 2),
                         "text": f"{ratio_now:.2f} bids per COE, {words} the one-year average of {ratio_avg:.2f}"})
 
+        # this compares the quota with a year ago so that we can say if supply is growing
         quota_now = history[-1]["quota"]
         quota_year_ago = history[-24]["quota"]
         change = (quota_now / max(quota_year_ago, 1) - 1) * 100
@@ -164,6 +176,8 @@ def market_drivers(current: float, steps: list[dict], history: list[dict]) -> li
         drivers.append({"key": "quota", "title": "Supply", "trend": trend, "value": round(change, 1),
                         "text": f"quota is {quota_now:,} per exercise, {change:+.0f}% versus a year ago"})
 
+    # this always adds the uncertainty driver so that the width of the range is visible on every
+    # card
     end = steps[-1]
     width = (end["q90"] - end["q10"]) / current * 50
     drivers.append({"key": "uncertainty", "title": "Uncertainty", "trend": uncertainty_for(width),
@@ -192,15 +206,19 @@ def alert_outlook(direction: str, target: float, latest: float, steps: list[dict
         "horizon_label": exercise_label(steps[-1]["month"], steps[-1]["bidding_no"]) if steps else None,
         "horizon_q50": steps[-1]["q50"] if steps else None,
     }
+    # this returns straight away if the target is already reached so that the watchlist shows it as
+    # triggered
     if (direction == "below" and latest <= target) or (direction == "above" and latest >= target):
         return {"status": "triggered", "probability_pct": 100.0, "when": None, **context}
 
+    # this finds the step with the best chance so that we can say when the target is most likely
     best_p, best_step = 0.0, None
     for step in steps:
         p = qt.cdf(qt.row_values(step), target)
         p = p if direction == "below" else 1.0 - p
         if p > best_p:
             best_p, best_step = p, step
+    # this turns the chance into a word so that the list stays easy to read
     status = "likely" if best_p >= 0.5 else "possible" if best_p >= 0.2 else "unlikely"
     when = exercise_label(best_step["month"], best_step["bidding_no"]) if best_step else None
     return {"status": status, "probability_pct": round(best_p * 100, 1), "when": when, **context}

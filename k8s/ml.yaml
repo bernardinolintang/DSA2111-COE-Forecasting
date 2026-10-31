@@ -9,6 +9,7 @@ kind: Job
 metadata:
   name: coe-ml-initial
 spec:
+  # these retry and clean up the job so that a short failure does not need a manual rerun
   backoffLimit: 2
   ttlSecondsAfterFinished: 86400
   template:
@@ -29,12 +30,14 @@ spec:
             - name: COE_WORKERS
               valueFrom:
                 configMapKeyRef: { name: coe-config, key: COE_WORKERS }
+          # these limit CPU and memory so that training does not take over the shared VM
           resources:
             requests: { cpu: "1", memory: 1Gi }
             limits: { cpu: "2", memory: 3Gi }
           volumeMounts:
             - name: shm             # worker processes need more than the default 64 MB /dev/shm
               mountPath: /dev/shm
+      # this is a memory-backed /dev/shm so that worker processes have enough shared memory
       volumes:
         - name: shm
           emptyDir: { medium: Memory, sizeLimit: 512Mi }
@@ -44,6 +47,7 @@ kind: CronJob
 metadata:
   name: coe-ml-retrain
 spec:
+  # this runs at 17:30 SGT on Wednesdays so that it happens after bidding closes at 4pm
   schedule: "30 17 * * 3"
   timeZone: Asia/Singapore
   concurrencyPolicy: Forbid          # never train two models at once

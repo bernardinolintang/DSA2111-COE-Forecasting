@@ -6,6 +6,7 @@ import { expect, test } from "./fixtures.js";
 
 const money = (v) => `$${Math.round(v).toLocaleString("en-SG")}`;
 
+// this removes test targets so that runs do not affect each other
 async function cleanup(page, request) {
   const cid = await page.evaluate(() => JSON.parse(localStorage.getItem("coe-client-id")));
   if (!cid) return;
@@ -14,6 +15,7 @@ async function cleanup(page, request) {
   }
 }
 
+// this checks the buyer path so that the plan and budget survive a reload
 test("buying: outlook, forecast range and a budget check, kept across reloads", async ({ page, request, problems }) => {
   const s = await (await request.get("/api/summary")).json();
   const a = s.categories[0];
@@ -60,6 +62,7 @@ test("buying: outlook, forecast range and a budget check, kept across reloads", 
   expect(problems).toEqual([]);
 });
 
+// this checks the renewal path so that the PQP uses real results then the forecast
 test("renewing: PQP estimated from recorded results, then projected with the forecast", async ({ page, request }) => {
   const h = (await (await request.get("/api/history/B?years=1")).json()).points;
   await page.goto("/#/plan?intent=renew");
@@ -89,6 +92,7 @@ test("renewing: PQP estimated from recorded results, then projected with the for
   await expect(page.locator("#plan-cat-note")).toContainText("Cat E is an open category for bidding only");
 });
 
+// this checks the watch button so that nothing goes to the server without a click
 test("the watch level is only saved when the user asks", async ({ page, request }) => {
   await page.goto("/#/plan?intent=buy");
   const btn = page.locator("#plan-watch");

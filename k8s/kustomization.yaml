@@ -3,9 +3,11 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Unique per group, because the Ronin VM (and its microk8s) is shared by the class.
+# this namespace is unique per group because the Ronin VM (and its microk8s) is shared by the class
+# so that we do not clash with other groups
 namespace: coe-g7
 
+# this lists every manifest so that one command applies them all
 resources:
   - namespace.yaml
   - config.yaml
@@ -14,7 +16,8 @@ resources:
   - web.yaml
   - ml.yaml
 
-# Images are pushed to microk8s' built-in registry (Week 5 lab).
+# images are pushed to microk8s' built-in registry (Week 5 lab) so that the cluster can pull them
+# locally
 images:
   - name: coe-api
     newName: localhost:32000/coe-api
@@ -26,6 +29,7 @@ images:
     newName: localhost:32000/coe-ml
     newTag: v1
 
+# this labels every object so that the whole project can be selected at once
 labels:
   - pairs:
       project: coe-forecast

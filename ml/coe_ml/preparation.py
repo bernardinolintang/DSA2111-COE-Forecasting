@@ -19,6 +19,7 @@ from .interventions import InterventionResult, effects_lookup, fit_interventions
 from .policy_events import POLICY_EVENTS
 
 
+# this holds everything learned from the fit data so that it can be reused on any later panel
 @dataclass
 class FittedState:
     target_scaler: TargetScaler
@@ -28,6 +29,7 @@ class FittedState:
 
 
 def fit_state(fit_panel: pd.DataFrame, n_workers: int = 1) -> FittedState:
+    # this learns each piece in order so that every step can use the one before it
     target_scaler = TargetScaler().fit(fit_panel)
     interventions = fit_interventions(fit_panel, target_scaler, n_workers)
     effects = effects_lookup(interventions)
@@ -46,15 +48,19 @@ def prepare(panel: pd.DataFrame, state: FittedState, use_policy: bool = True) ->
     input the network never saw during training, whose weights are still random.
     """
     prepared = apply_policy_effects(panel, state.effects)
+    # this zeroes dummies Box-Tiao could not estimate so that an unseen input cannot affect the
+    # forecast
     for event, col in zip(POLICY_EVENTS, POLICY_FEATURES):
         unseen = ~prepared["category"].map(lambda c, e=event.code: (e, c) in state.effects)
         prepared.loc[unseen, col] = 0.0
+    # this blanks all policy inputs for the ablation so that we can measure what they add
     if not use_policy:
         prepared[POLICY_FEATURES + ["policy_effect"]] = 0.0
     prepared = add_target(prepared, state.target_scaler)
     return state.feature_scaler.transform(prepared)
 
 
+# this turns a scaled value back into SGD so that results can be read as premiums
 def to_premium(state: FittedState, category: str, scaled) -> np.ndarray:
     """Scaled target -> SGD premium."""
     return state.target_scaler.inverse(category, scaled)

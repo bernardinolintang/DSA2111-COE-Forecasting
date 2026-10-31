@@ -1,6 +1,7 @@
 // Hash URLs, e.g. #/scenario/A?quota=10. Pure functions (no DOM), shared by the
 // router, the tour and the analyst, and unit-tested in Node.
 
+// these list valid pages and query keys so that bad links can be ignored
 export const PAGES = ["overview", "forecast", "scenario", "bid", "plan", "policy", "model", "alerts", "learn"];
 const WITH_CATEGORY = new Set(["forecast", "scenario", "bid", "policy"]);
 const QUERY_KEYS = ["quota", "bid", "event", "section", "intent"];
@@ -34,13 +35,14 @@ export function clampQuota(value) {
 /** { page: "bid", category: "A", bid: 125000 } -> "#/bid/A?bid=125000" */
 export function buildHash({ page = "overview", category, scenario, ...rest } = {}) {
   if (!PAGES.includes(page)) page = "overview";
-  // Supply what-ifs live in the Scenario Lab: an old forecast + scenario link goes there.
+  // supply what-ifs live in the Scenario Lab so that an old forecast + scenario link goes there
   if (page === "forecast" && scenarioPct(scenario)) page = "scenario";
   if (page === "scenario" && rest.quota == null && scenarioPct(scenario) != null) rest.quota = scenarioPct(scenario);
   let path = page === "overview" ? "" : page;
   if (WITH_CATEGORY.has(page) && category) path += `/${category}`;
   if (page === "learn" && LEARN_SECTIONS.includes(rest.section) && rest.section !== "guide") path += `/${rest.section}`;
   const query = new URLSearchParams();
+  // this skips empty values so that urls stay short
   for (const key of QUERY_KEYS) {
     const v = rest[key];
     if (v == null || v === "" || (key === "quota" && !Number(v)) || (key === "section" && page === "learn")) continue;

@@ -20,16 +20,19 @@ import {
   outlookPill, pct, provenance, rangeShort, raw, segmented, sgt, store,
 } from "../util.js";
 
+// these are the history ranges so that the viewer can pick how far back the chart goes
 const RANGES = [
   { value: "1", label: "1Y" }, { value: "3", label: "3Y" }, { value: "5", label: "5Y" }, { value: "0", label: "All" },
 ];
-// Short names for policy markers on charts (the Policy Lab shows the full names).
+// these are short names for policy markers on charts (the Policy Lab shows the full names) so that
+// labels fit on the chart
 export const POLICY_SHORT = {
   mas_loan_curbs_2013: "Loan curbs", cat_a_power_cap_2014: "97kW cap", mas_loan_easing_2016: "Loan easing",
   zero_growth_2018: "Zero growth", covid_resumption_2020: "Post-lockdown", ev_reclassification_2022: "EV 110kW",
   cut_and_fill_2023: "Cut-and-fill", quota_injection_2025: "Injection",
 };
 const pct0 = (v) => pct(v, { sign: false, digits: 0 });
+// these are the trend arrows so that the indicators can show a direction
 const ARROW = { up: "↑", down: "↓", flat: "→" };
 
 /** Warm the cache for a category's forecast (card hover/focus), so opening it is instant. */
@@ -39,9 +42,11 @@ export function prefetch(category) {
     `/recommendation/${category}?scenario=base`, "/policy/events");
 }
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root, { category = "A" } = {}, page = {}) {
   const categories = await api.get("/categories");
   const metaOf = (c) => categories.find((x) => x.code === c);
+  // this holds what the viewer picked so that updates know what to load
   const state = {
     category: CATEGORY_CODES.includes(category) ? category : "A",
     years: store.get("coe-range", "1"),
@@ -50,8 +55,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   let shownCategory = state.category;         // the category whose data is on screen
   const meta = metaOf(state.category);
 
-  // Key figures shown before the data arrives come from the Overview's summary
-  // when it is already loaded: the same numbers, so nothing jumps when data lands.
+  // key figures shown before the data arrives come from the Overview's summary when it is already
+  // loaded, the same numbers so that nothing jumps when data lands
   const pre = api.peek("/summary")?.categories.find((c) => c.code === state.category);
   const preFc = pre?.signal ? pre : null;
 
@@ -134,19 +139,21 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     </section>`);
 
   const $ = (sel) => root.querySelector(sel);
+  // this sets which button looks pressed so that a change from anywhere moves the selection
   const press = (name, value) => root.querySelectorAll(`[data-seg="${name}"] button`)
     .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === value)));
 
-  // Category links create a history entry; the router hands them back to
-  // page.navigate below, so Back/Forward also work in place.
+  // category links create a history entry and the router hands them back to page.navigate below so
+  // that Back/Forward also work in place
   onSegment(root, "cat", (c) => { location.hash = buildHash({ page: "forecast", category: c }); });
-  // A history range is an explicit choice of window, so it also clears any zoom.
+  // a history range is an explicit choice of window so that it also clears any zoom
   onSegment(root, "range", (y) => { state.years = y; store.set("coe-range", y); zoomReset = true; update(); });
-  // Pointing at a choice fetches its data, so the switch itself is instant.
+  // pointing at a choice fetches its data so that the switch itself is instant
   $('[data-seg="cat"]').addEventListener("pointerover", (e) => {
     const c = e.target.closest("button[data-value]")?.dataset.value;
     if (c && c !== state.category) prefetch(c);
   });
+  // this flips between chart and table so that the same data can be read either way
   $("#toggle-table").addEventListener("click", (e) => {
     state.table = !state.table;
     e.currentTarget.setAttribute("aria-pressed", String(state.table));
@@ -157,6 +164,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   });
   setView({ category: state.category });
 
+  // this changes category in place so that the page does not fully reload
   page.navigate = ({ category: c }) => {
     const next = CATEGORY_CODES.includes(c) ? c : "A";
     press("cat", next);
@@ -170,6 +178,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
 
   // ---- market pulse: depends on the category only ----
   const pulse = { pressure: null, quota: null, token: 0 };
+  // this loads demand and quota charts for one category so that they can load after the main chart
   async function loadPulse() {
     const token = ++pulse.token;
     let h;
@@ -187,6 +196,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     }
     if (!root.isConnected || token !== pulse.token) return;
     const pts = h.points;
+    // this shows fewer labels on a phone so that the axis does not get crowded
     const every = Math.ceil(pts.length / (window.innerWidth < 600 ? 4 : 8));      // fewer labels on a phone
     const tick = (p, i) => (i % every === 0 ? p.label.split(" · ")[0].replace(/ 20/, " '") : "");
     const pressure = pts.map((p, i) => ({ label: tick(p, i), title: p.label, value: p.bids_received / Math.max(p.quota, 1), seriesLabel: "bids per COE" }));
@@ -202,8 +212,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   }
   loadPulse();
 
-  // Every update is tagged; a slower, older response (e.g. after quickly clicking
-  // Cat B then Cat C) is discarded instead of overwriting the newer one.
+  // every update is tagged, a slower older response (e.g. after quickly clicking Cat B then Cat C)
+  // is thrown away so that it cannot overwrite the newer one
   let latestUpdate = 0;
   let fanChart = null;
   let fanKind = null;            // "fan" | "history": what the chart is showing
@@ -218,6 +228,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
       .map((e) => ({ x: new Date(e.effective_month), label: POLICY_SHORT[e.code] || e.name }));
   }
 
+  // this reloads all data for the page so that the header and numbers switch together
   async function update() {
     const token = ++latestUpdate;
     const { category: cat, years } = state;
@@ -238,6 +249,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     shownCategory = cat;
 
     if (history.status !== "fulfilled" || !history.value.points.length) {
+      // this is the case with nothing to plot so that the page shows a notice and not an empty
+      // chart
       // Nothing to plot at all.
       fanChart?.destroy();
       fanChart = null;
@@ -264,6 +277,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     first = false;
   }
 
+  // this updates the page heading so that it always matches the data on screen
   function renderHeader(cat) {
     const m = metaOf(cat);
     swap($("#fc-title"), () => {
@@ -298,6 +312,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     mount($("#fc-provenance"), "");
   }
 
+  // this updates the key figures so that the numbers count to their new values
   function renderFigures(forecast, a, animate) {
     const [next] = forecast.steps;
     const end = forecast.steps[forecast.steps.length - 1];
@@ -313,6 +328,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     swap(sig, () => { mount(sig, outlookPill(a)); }, { key: a.outlook, animate });
   }
 
+  // this draws the fan or morphs it so that a category change is easy to follow
   function renderFan(points, forecast, markers, animate) {
     const { opts, last, rows } = fanOptions({
       history: points, steps: forecast.steps, name: metaOf(state.category).name,
@@ -339,12 +355,14 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   }
 
   // ---- market outlook: built once, then updated field by field ----
+  // this builds one probability row so that the outlook card repeats less markup
   function probRow(key, term) {
     return html`<div class="prob-row" data-prob="${key}">
       <div class="row-between small"><span class="muted"><span class="prob-label"></span> ${term ? explain(term, "chance of a meaningful drop") : ""}</span><strong class="prob-value"></strong></div>
       <div class="meter mt-8" role="meter" aria-valuemin="0" aria-valuemax="100"><span></span></div></div>`;
   }
 
+  // this updates one row so that its meter and text change together
   function setProb(key, label, value, animate) {
     const row = $(`[data-prob="${key}"]`);
     const labelEl = row.querySelector(".prob-label");
@@ -356,6 +374,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     meter.firstElementChild.style.width = `${Math.max(0, Math.min(100, value))}%`;
   }
 
+  // this turns a driver into an indicator so that the card can show it with an arrow
   function indicator(d) {
     if (d.key === "quota") {
       return { label: "Quota", arrow: ARROW[d.trend], text: d.trend === "flat" ? "about the same as a year ago" : `${pct(d.value, { digits: 0 })} vs a year ago` };
@@ -366,6 +385,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     return null;
   }
 
+  // this updates the outlook field by field so that the card does not get rebuilt each time
   function renderOutlook(a, animate) {
     const box = $("#advice");
     if (!box.querySelector(".outlook")) {
@@ -388,9 +408,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     const threshold = Math.round(a.threshold_pct);
     el.className = `outlook outlook-${a.direction} strength-${a.strength}`;
     el.querySelector(".advice-for").textContent = `Market outlook for ${metaOf(state.category).name}`;
-    // The outlook changes calmly (fades and slides a few px), never with a flash:
-    // it informs a large financial decision, and "No clear direction" is drawn
-    // in plain ink so it never looks more certain than it is.
+    // the outlook changes calmly (fades and slides a few px), never with a flash, and "No clear
+    // direction" is drawn in plain ink so that it never looks more certain than it is
     const label = el.querySelector(".outlook-label");
     swap(label, () => { mount(label, html`${raw(ICONS[a.direction])}<span>${a.label}</span>`); }, { key: a.outlook, animate });
     const summary = el.querySelector(".outlook-summary");
@@ -419,7 +438,8 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   }
 
   function renderSteps(forecast) {
-    // A reference table: updated instantly, never animated.
+    // this reference table updates instantly and is never animated so that the numbers can be read
+    // straight away
     const origin = forecast.origin.premium;
     mount($("#steps"), raw(dataTable(
       [{ label: "Exercise", get: (s) => s.label }, { label: "Quota", num: true, get: (s) => number(s.quota) },
@@ -429,6 +449,7 @@ export async function render(root, { category = "A" } = {}, page = {}) {
     )));
   }
 
+  // this tells the analyst what is on screen so that its answers match the page
   function publish(forecast, a) {
     const [next] = forecast.steps;
     const end = forecast.steps[forecast.steps.length - 1];
@@ -443,5 +464,6 @@ export async function render(root, { category = "A" } = {}, page = {}) {
   }
 
   await update();
+  // this removes the charts when leaving so that observers and timers do not keep running
   return () => { [pulse.pressure, pulse.quota, fanChart].forEach((c) => c?.destroy()); };
 }

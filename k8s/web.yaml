@@ -18,20 +18,25 @@ spec:
           image: coe-web            # rewritten to the registry image by kustomization.yaml
           ports:
             - containerPort: 80
+          # this tells nginx where the API is so that it can forward /api
           env:
             - name: API_UPSTREAM
               value: coe-api:8000
+          # this checks the site is ready so that traffic only goes to working pods
           readinessProbe:
             httpGet: { path: /, port: 80 }
             periodSeconds: 10
+          # this restarts a pod that stops answering so that it can heal itself
           livenessProbe:
             httpGet: { path: /, port: 80 }
             initialDelaySeconds: 10
             periodSeconds: 20
+          # these set CPU and memory limits so that one pod cannot use up the shared VM
           resources:
             requests: { cpu: 25m, memory: 16Mi }
             limits: { cpu: 200m, memory: 64Mi }
 ---
+# this is the NodePort service so that the site can be reached through the SSH tunnel
 apiVersion: v1
 kind: Service
 metadata:

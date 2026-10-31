@@ -22,9 +22,12 @@ import {
   CATEGORY_CODES, errorBox, forecastId, html, money, mount, number, onSegment, pct, provenance, rangeShort, segmented,
 } from "../util.js";
 
+// this formats the signed percent and reads the quota from the url so that a link can open any
+// scenario
 const signed = (n) => (n === 0 ? "0%" : `${n > 0 ? "+" : "−"}${Math.abs(n)}%`);
 const quotaOf = (query) => clampQuota(query.quota ?? scenarioPct(query.scenario) ?? 0);
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root, { category = "A", query = {} } = {}, page = {}) {
   const [categories, scenarios] = await Promise.all([api.get("/categories"), api.get("/scenarios")]);
   const modelled = [...scenarios].sort((a, b) => a.quota_pct - b.quota_pct);       // -20 … +20
@@ -98,6 +101,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
   let loadToken = 0;
   let hashTimer;
 
+  // this redraws from the slider value so that it updates without any request
   function paint({ animate = true, duration = DURATION.card } = {}) {
     if (!data) return;
     const { pct: q } = state;
@@ -124,8 +128,8 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     $("#lab-range").textContent = rangeShort(end.q10, end.q90);
     $("#lab-vs-today").textContent = pct((end.q50 / data.origin.premium - 1) * 100);
 
-    // "↓ $1,685 relative to as announced (−1.3%)": the amount counts; the words
-    // around it only change when the direction does.
+    // "down $1,685 relative to as announced (-1.3%)": the amount counts and the words around it
+    // only change when the direction does so that the sentence does not flicker
     const d = scenarioDelta(end.q50, baseEnd.q50, q);
     const deltaEl = $("#lab-delta");
     const cmp = deltaEl.querySelector(".fig-cmp");
@@ -170,6 +174,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     });
   }
 
+  // this fills the table of modelled runs so that the viewer can compare them
   function paintTable(current, q, exact) {
     const baseEnd = data.base[data.base.length - 1];
     const rows = data.runs.map((r) => ({ pct: r.pct, steps: r.steps, label: scenarioLabel(r.pct), mine: r.pct === q }));
@@ -187,6 +192,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
       })}</tbody></table></div>`);
   }
 
+  // this moves the slider so that the url, page and analyst stay in step
   function setQuota(value, opts) {
     const q = clampQuota(value);
     if (q === state.pct && data) return;
@@ -194,11 +200,13 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     paint(opts);
   }
 
+  // these connect the slider and its scale so that dragging and clicking both work
   range.addEventListener("input", () => setQuota(range.value, { duration: DURATION.micro }));
   root.querySelector(".range-scale").addEventListener("click", (e) => {
     const b = e.target.closest("[data-quota]");
     if (b) setQuota(b.dataset.quota);
   });
+  // this sets which button looks pressed so that a change from anywhere moves the selection
   const press = (value) => root.querySelectorAll('[data-seg="cat"] button')
     .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === value)));
   onSegment(root, "cat", (c) => { location.hash = buildHash({ page: "scenario", category: c, quota: state.pct }); });
@@ -207,6 +215,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     if (c && c !== state.category) api.prefetch(...modelled.map((s) => `/forecast/${c}?scenario=${s.id}`), `/history/${c}?years=1`);
   });
 
+  // this loads all five runs once so that dragging the slider needs no more requests
   async function load() {
     const token = ++loadToken;
     const cat = state.category;
@@ -238,6 +247,7 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     }
   }
 
+  // this changes category or quota in place so that the page does not fully reload
   page.navigate = ({ category: c, query: q = {} }) => {
     const next = CATEGORY_CODES.includes(c) ? c : "A";
     press(next);
@@ -249,10 +259,12 @@ export async function render(root, { category = "A", query = {} } = {}, page = {
     load();
     return true;
   };
-  // The analyst can set the slider in place: a modelled scenario id or a percentage.
+  // the analyst can set the slider in place with a modelled scenario id or a percentage so that it
+  // can show its answer on the page
   setPageActions({ setQuota: (value) => setQuota(typeof value === "string" && scenarioPct(value) != null ? scenarioPct(value) : value) });
   setView({ category: state.category, quota_pct: state.pct });
 
   await load();
+  // this cleans up when leaving so that the timer and chart stop
   return () => { clearTimeout(hashTimer); chart?.destroy(); };
 }

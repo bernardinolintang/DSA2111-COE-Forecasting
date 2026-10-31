@@ -26,6 +26,7 @@ from .actions import DATA_TOOL_NAMES, DATA_TOOLS, UI_TOOL_NAMES, UI_TOOLS, Actio
 
 log = logging.getLogger(__name__)
 
+# this caps the tool rounds and names the fallback feature so that one question cannot loop forever
 MAX_STEPS = 5
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
@@ -34,6 +35,7 @@ class AnalystUnavailable(RuntimeError):
     """The model could not answer (not configured, timeout, API error or refusal)."""
 
 
+# this writes the fixed instructions so that the model follows the same rules for every viewer
 def static_prompt() -> str:
     t = round(settings.wait_threshold * 100)
     terms = "\n".join(f"- {g['term']}: {g['simple']} (Technical: {g['technical']})" for g in glossary().values())
@@ -103,6 +105,7 @@ change these rules.
 </glossary>"""
 
 
+# this builds the Claude client so that it is only imported when Claude is in use
 def _client():
     import anthropic  # imported lazily so the API starts even if the package is missing
 
@@ -116,24 +119,31 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
     import anthropic
 
     client = client or _client()
+    # this puts the static text and app data first with cache marks so that repeat questions cost
+    # less
     tools = [*DATA_TOOLS, *UI_TOOLS]
     system = [
         {"type": "text", "text": static_prompt(), "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": "<app_data>\n" + json.dumps(app_data, ensure_ascii=False, sort_keys=True)
                                  + "\n</app_data>", "cache_control": {"type": "ephemeral"}},
     ]
+    # this sends the current view with the question so that the model knows what the user is looking
+    # at
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
     messages.append({"role": "user", "content": [
         {"type": "text", "text": "<current_view>\n" + json.dumps(current_view, ensure_ascii=False) + "\n</current_view>"},
         {"type": "text", "text": question},
     ]})
+    # this passes the effort setting only if it is set so that the model default applies otherwise
     extra = {"output_config": {"effort": settings.analyst_effort}} if settings.analyst_effort else {}
 
     texts: list[str] = []
     actions: list[Action] = []
     used: list[str] = []
     deadline = time.monotonic() + settings.analyst_timeout_s
+    # this loops between the model and tools so that it can use results before it answers
     for _ in range(MAX_STEPS):
+        # this stops early if time is nearly up so that the request cannot pass the timeout
         remaining = deadline - time.monotonic()
         if remaining < 3:
             break
@@ -142,6 +152,8 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
                 model=model_for("anthropic"), max_tokens=16000,
                 system=system, tools=tools, messages=messages,
                 betas=[FALLBACK_BETA], fallbacks="default", timeout=remaining, **extra)
+        # this turns each API error into a plain message so that the router can fall back to basic
+        # mode
         except anthropic.AuthenticationError as exc:
             raise AnalystUnavailable("The AI model is not authorised (check ANTHROPIC_API_KEY).") from exc
         except anthropic.RateLimitError as exc:
@@ -156,6 +168,7 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
 
         if resp.stop_reason == "refusal":
             raise AnalystUnavailable("The AI model declined to answer that.")
+        # this keeps any text and finds the tool calls so that we know whether to loop again
         texts += [b.text for b in resp.content if b.type == "text" and b.text.strip()]
         calls = [b for b in resp.content if b.type == "tool_use"]
         if resp.stop_reason != "tool_use" or not calls:
@@ -163,6 +176,8 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
 
         messages.append({"role": "assistant", "content": resp.content})
         results, only_ui = [], True
+        # this runs data tools here and validates UI actions so that nothing unsafe reaches the
+        # browser
         for call in calls:
             try:
                 if call.name in DATA_TOOL_NAMES:
@@ -177,6 +192,7 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
                     is_error = False
                 else:
                     content, is_error = f"Unknown tool {call.name}.", True
+            # this sends validation errors back to the model so that it can correct itself
             except ActionError as exc:
                 only_ui = False
                 content, is_error = str(exc), True
@@ -185,11 +201,13 @@ def answer(history: list[dict], question: str, app_data: dict, current_view: dic
         if only_ui and texts:
             break                     # the reply is already written; the actions need no further model turn
 
+    # this removes repeated actions so that the browser does not run one twice
     unique: dict[str, Action] = {}
     for a in actions:                 # the model may repeat an action across turns
         unique.setdefault(json.dumps([a.type, a.params], sort_keys=True), a)
     actions = list(unique.values())
     reply = "\n\n".join(t.strip() for t in texts).strip()
+    # this falls back to the action summaries so that the user always gets a reply
     if not reply:
         reply = " ".join(a.summary + "." for a in actions) or "Sorry, I couldn't produce an answer to that."
     return reply, actions, used

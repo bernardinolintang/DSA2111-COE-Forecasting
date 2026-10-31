@@ -17,6 +17,7 @@ import {
 } from "../util.js";
 import { POLICY_SHORT as SHORT } from "./forecast.js";      // short names for the chart markers
 
+// these are the effect names and bar limit so that the cards stay readable
 const KIND = { step: "Permanent shift", pulse: "One-off shock", temporary: "Temporary shift" };
 const LIMIT = 60;   // effect bars are drawn on a ±60% scale
 
@@ -44,8 +45,10 @@ export function eventPeriod(ev) {
   return { x0: start, x1: end, text: `the ${months} months after it took effect` };
 }
 
+// this formats a month in full so that event dates are easy to read
 const monthYear = (d) => new Date(d).toLocaleDateString("en-SG", { month: "long", year: "numeric", timeZone: "UTC" });
 
+// this draws one effect bar with its CI so that the size and uncertainty show together
 function effectRow(e, selected) {
   const clamp = (v) => Math.max(-LIMIT, Math.min(LIMIT, v));
   const toPos = (v) => 50 + (clamp(v) / LIMIT) * 50;
@@ -63,6 +66,7 @@ function effectRow(e, selected) {
     </div>`;
 }
 
+// this picks the sentence for the viewer's category so that the card talks about their category
 function plainFor(ev, category) {
   const mine = ev.effects.find((e) => e.category === category);
   return mine ? plainEffect(mine, ev.kind)
@@ -70,6 +74,7 @@ function plainFor(ev, category) {
     : `This policy did not apply to Cat ${category}.`;
 }
 
+// this draws one event card so that all events look the same
 function eventCard(ev, category, selected) {
   const applies = ev.categories.includes(category);
   return html`
@@ -102,6 +107,7 @@ function eventCard(ev, category, selected) {
     </div>`;
 }
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root, { category = "B", query = {} } = {}, page = {}) {
   category = CATEGORY_CODES.includes(category) ? category : "B";
   mount(root, html`
@@ -133,12 +139,14 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     </section>`);
 
   const $ = (sel) => root.querySelector(sel);
+  // these are the page's values so that the functions below can share them
   let chart = null;
   let events = [];
   let latestDraw = 0;
   let selected = null;                 // code of the event shown on the chart
   let rendered = false;
 
+  // these work out the markers and shaded period so that the chart follows the selected event
   const relevant = () => events.filter((e) => e.categories.includes(category));
   const markers = () => relevant().map((e) => ({ x: new Date(e.effective_month), label: SHORT[e.code] || e.name, active: e.code === selected }));
   const regions = () => {
@@ -146,6 +154,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     return ev ? [eventPeriod(ev)] : [];
   };
 
+  // this draws the event cards so that they follow the category
   function renderEvents() {
     const box = $("#events");
     const fill = () => mount(box, events.length ? html`${events.map((ev) => eventCard(ev, category, ev.code === selected))}`
@@ -154,6 +163,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     rendered = true;
   }
 
+  // this draws the event picker so that only events for this category show
   function paintPicker() {
     const list = relevant();
     mount($("#event-picker"), list.length ? html`
@@ -162,6 +172,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
         ${SHORT[e.code] || e.name}<span class="muted"> · ${new Date(e.effective_month).getUTCFullYear()}</span></button>`)}` : "");
   }
 
+  // this writes the summary under the chart so that the event and its effect are seen together
   function paintFocus() {
     const box = $("#policy-focus");
     const ev = events.find((e) => e.code === selected);
@@ -179,6 +190,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     else swap(box, fill, { key: `${ev.code}|${category}`, distance: 4 });
   }
 
+  // this marks the selected card so that it matches the chart
   function markCards() {
     root.querySelectorAll("[data-event]").forEach((el) => {
       const on = el.dataset.event === selected;
@@ -201,6 +213,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     if (scroll && ev) $("#policy-chart-card").scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
   }
 
+  // this scrolls to an event and flashes it so that the analyst can point at it
   function highlightEvent(code) {
     const el = code && root.querySelector(`[data-event="${CSS.escape(code)}"]`);
     if (!el) return;
@@ -212,6 +225,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     el.focus({ preventScroll: true });
   }
 
+  // this draws the full history so that the whole policy timeline fits on the chart
   async function drawHistory({ animate = false } = {}) {
     const token = ++latestDraw;
     const cat = category;
@@ -246,6 +260,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     }
   }
 
+  // this tells the analyst what is on screen so that its answers match the page
   function publish() {
     const effects = events.flatMap((ev) => ev.effects.filter((e) => e.category === category).map((e) => ({ ev, e })));
     const biggest = effects.sort((a, b) => Math.abs(b.e.pct_effect) - Math.abs(a.e.pct_effect))[0];
@@ -256,6 +271,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     ] });
   }
 
+  // this changes category in place so that the page does not fully reload
   function setCategory(c) {
     if (!CATEGORY_CODES.includes(c)) return;
     category = c;
@@ -270,6 +286,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     drawHistory({ animate: true });
   }
 
+  // these connect the controls so that all the ways of picking an event do the same thing
   onSegment(root, "cat", setCategory);
   $("#event-picker").addEventListener("click", (e) => {
     const b = e.target.closest("[data-pick]");
@@ -283,6 +300,7 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
     const b = e.target.closest("[data-show-event]");
     if (b) select(b.dataset.showEvent === selected ? null : b.dataset.showEvent, { scroll: b.dataset.showEvent !== selected });
   });
+  // this lets the analyst change the page so that it can show what it is explaining
   setPageActions({ setCategory, highlightEvent });
   setView({ category, event: query.event || null });
   page.navigate = ({ category: c, query: q = {} }) => {
@@ -303,5 +321,6 @@ export async function render(root, { category = "B", query = {} } = {}, page = {
   publish();
   await drawHistory();
   if (query.event) highlightEvent(query.event);
+  // this removes the chart when leaving so that its observer stops
   return () => chart?.destroy();
 }

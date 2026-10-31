@@ -16,6 +16,7 @@ from .common import require_category, require_run, with_label
 router = APIRouter(prefix="/model", tags=["model"])
 
 
+# this finds the latest run with a backtest so that quick retrains do not blank the metrics page
 def _evaluated_run(conn: Connection) -> dict:
     run = repo.latest_evaluated_run(conn)
     if run is None:
@@ -27,11 +28,14 @@ def _evaluated_run(conn: Connection) -> dict:
 def metrics(conn: Connection = Depends(get_connection)):
     """Backtest leaderboard from the latest run that was fully evaluated."""
     run = _evaluated_run(conn)
+    # this adds readable names so that the leaderboard does not show codes
     rows = [{**r, "label": MODELS.get(r["model"], r["model"])} for r in repo.backtest_metrics(conn, run["id"])]
     backtest = run["params"].get("backtest", {})
     return {
         "run": run,
         "test_period": {"exercises": backtest.get("test_exercises"), "origin_stride": backtest.get("origin_stride")},
+        # this splits rows into overall, by horizon and by category so that each table gets what it
+        # needs
         "leaderboard": sorted((r for r in rows if r["category"] == "*" and r["horizon"] == 0),
                               key=lambda r: r["pinball"]),
         "by_horizon": sorted((r for r in rows if r["category"] == "*" and r["horizon"] > 0),
@@ -46,6 +50,7 @@ def backtest(category: str, model: str = "hybrid", horizon: int = Query(1, ge=1,
              conn: Connection = Depends(get_connection)):
     """Out-of-sample predictions vs actual premiums for one model and horizon."""
     category = require_category(category)
+    # this rejects unknown models so that a typo gets a clear 404
     if model not in MODELS:
         raise HTTPException(status_code=404, detail=f"Unknown model '{model}'.")
     run = _evaluated_run(conn)
@@ -57,10 +62,12 @@ def backtest(category: str, model: str = "hybrid", horizon: int = Query(1, ge=1,
 def interpretability(conn: Connection = Depends(get_connection)):
     """TFT variable-selection weights (past and future inputs) and attention by lag."""
     run = require_run(conn)
+    # this groups importance by encoder and decoder so that past and future inputs are shown apart
     groups = defaultdict(list)
     for r in repo.variable_importance(conn, run["id"]):
         groups[r["component"]].append({"variable": r["variable"], "label": VARIABLES.get(r["variable"], r["variable"]),
                                         "importance": r["importance"]})
+    # this groups attention by category so that each one can be drawn on its own
     attention = defaultdict(list)
     for r in repo.attention(conn, run["id"]):
         attention[r["category"]].append({"lag": r["lag"], "weight": r["weight"]})

@@ -15,7 +15,8 @@
 -- 1. Raw market data
 -- ---------------------------------------------------------------------------
 
--- One row per (bidding exercise, vehicle category). Source: LTA via data.gov.sg.
+-- this holds one row per (bidding exercise, vehicle category) from LTA via data.gov.sg so that
+-- every result is stored once
 CREATE TABLE IF NOT EXISTS coe_results (
     id              SERIAL PRIMARY KEY,
     month           DATE        NOT NULL,              -- first day of the bidding month
@@ -28,9 +29,11 @@ CREATE TABLE IF NOT EXISTS coe_results (
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (month, bidding_no, category)
 );
+-- this speeds up reads by category and date so that history queries stay fast
 CREATE INDEX IF NOT EXISTS ix_coe_results_cat_month ON coe_results (category, month, bidding_no);
 
--- Monthly macro-economic indicators (SingStat Table Builder).
+-- this holds monthly macro indicators from SingStat so that the pipeline can read them with the COE
+-- data
 CREATE TABLE IF NOT EXISTS macro_indicators (
     month       DATE             NOT NULL,
     indicator   TEXT             NOT NULL,   -- e.g. cpi_all_items, sora_3m, gdp_real
@@ -39,7 +42,7 @@ CREATE TABLE IF NOT EXISTS macro_indicators (
     PRIMARY KEY (month, indicator)
 );
 
--- Structural policy shocks used by the Box-Tiao intervention model.
+-- this holds the policy shocks used by the Box-Tiao model so that the Policy Lab can list them
 CREATE TABLE IF NOT EXISTS policy_events (
     code            TEXT PRIMARY KEY,
     name            TEXT    NOT NULL,
@@ -55,8 +58,8 @@ CREATE TABLE IF NOT EXISTS policy_events (
 -- 2. Model outputs
 -- ---------------------------------------------------------------------------
 
--- Each execution of the ML pipeline creates one run. The API always serves the
--- latest run whose status is 'succeeded'.
+-- each run of the ML pipeline creates one row, the API serves the latest run with status succeeded
+-- so that a half-finished run is never shown
 CREATE TABLE IF NOT EXISTS model_runs (
     id            SERIAL PRIMARY KEY,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -73,8 +76,8 @@ CREATE TABLE IF NOT EXISTS model_runs (
     notes         TEXT
 );
 
--- Box-Tiao intervention estimates: omega is the level shift in Box-Cox units,
--- pct_effect the implied percentage change in the premium.
+-- this holds Box-Tiao estimates, omega is the level shift in Box-Cox units and pct_effect the
+-- percent change in the premium so that both the model and the page have what they need
 CREATE TABLE IF NOT EXISTS intervention_effects (
     run_id      INTEGER NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     event_code  TEXT    NOT NULL REFERENCES policy_events(code) ON DELETE CASCADE,
@@ -88,7 +91,8 @@ CREATE TABLE IF NOT EXISTS intervention_effects (
     PRIMARY KEY (run_id, event_code, category)
 );
 
--- Multi-horizon probabilistic forecasts, one row per future bidding exercise.
+-- this holds the probabilistic forecasts, one row per future exercise so that a scenario can be
+-- read as a path
 CREATE TABLE IF NOT EXISTS forecasts (
     run_id      INTEGER  NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     category    CHAR(1)  NOT NULL,
@@ -107,7 +111,8 @@ CREATE TABLE IF NOT EXISTS forecasts (
     PRIMARY KEY (run_id, category, scenario, step)
 );
 
--- Rolling-origin backtest accuracy for the TFT and every baseline.
+-- this holds rolling-origin accuracy for the TFT and every baseline so that the leaderboard can be
+-- read straight from the table
 CREATE TABLE IF NOT EXISTS backtest_metrics (
     run_id      INTEGER  NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     model       TEXT     NOT NULL,
@@ -124,7 +129,7 @@ CREATE TABLE IF NOT EXISTS backtest_metrics (
     PRIMARY KEY (run_id, model, category, horizon)
 );
 
--- Individual backtest predictions (used for the "predicted vs actual" chart).
+-- this holds each backtest prediction so that the "predicted vs actual" chart can be drawn
 CREATE TABLE IF NOT EXISTS backtest_predictions (
     run_id      INTEGER  NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     model       TEXT     NOT NULL,
@@ -140,7 +145,8 @@ CREATE TABLE IF NOT EXISTS backtest_predictions (
     PRIMARY KEY (run_id, model, category, origin, horizon)
 );
 
--- TFT interpretability: variable-selection weights and attention by lag.
+-- this holds the TFT variable-selection weights so that the model page can show what the model
+-- looks at
 CREATE TABLE IF NOT EXISTS variable_importance (
     run_id      INTEGER NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     component   TEXT    NOT NULL CHECK (component IN ('static', 'encoder', 'decoder')),
@@ -149,6 +155,7 @@ CREATE TABLE IF NOT EXISTS variable_importance (
     PRIMARY KEY (run_id, component, variable)
 );
 
+-- this holds attention by lag so that the model page can show which past exercises mattered
 CREATE TABLE IF NOT EXISTS attention_weights (
     run_id      INTEGER  NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
     category    CHAR(1)  NOT NULL,
@@ -161,8 +168,8 @@ CREATE TABLE IF NOT EXISTS attention_weights (
 -- 3. User data (written by the API)
 -- ---------------------------------------------------------------------------
 
--- Anonymous price alerts. client_id is a random UUID generated in the browser,
--- so no personal data is stored.
+-- this holds anonymous price alerts, client_id is a random UUID made in the browser so that no
+-- personal data is stored
 CREATE TABLE IF NOT EXISTS price_alerts (
     id          SERIAL PRIMARY KEY,
     client_id   UUID        NOT NULL,
@@ -172,4 +179,5 @@ CREATE TABLE IF NOT EXISTS price_alerts (
     label       TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- this speeds up reads by client so that the watchlist loads fast
 CREATE INDEX IF NOT EXISTS ix_price_alerts_client ON price_alerts (client_id);

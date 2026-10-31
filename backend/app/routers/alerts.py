@@ -26,6 +26,8 @@ from ..services.recommendation import alert_outlook
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
+# this adds the latest premium and forecast odds to each alert so that the list always reflects the
+# newest run
 def _score(conn: Connection, alerts: list[dict]) -> list[dict]:
     run = repo.latest_run(conn)
     latest = {r["category"]: r["premium"] for r in repo.latest_exercises(conn, n=1)}
@@ -33,6 +35,8 @@ def _score(conn: Connection, alerts: list[dict]) -> list[dict]:
     scored = []
     for alert in alerts:
         cat = alert["category"]
+        # this loads each category's forecast only once so that many alerts do not repeat the same
+        # query
         if run and cat not in steps_by_cat:
             steps_by_cat[cat] = repo.forecast(conn, run["id"], cat, "base")
         outlook = alert_outlook(alert["direction"], alert["target"], latest.get(cat, 0), steps_by_cat.get(cat, []))
@@ -40,14 +44,17 @@ def _score(conn: Connection, alerts: list[dict]) -> list[dict]:
     return scored
 
 
+# this returns one visitor's watchlist so that nobody sees someone else's targets
 @router.get("", response_model=list[Alert])
 def list_alerts(client_id: UUID, conn: Connection = Depends(get_connection)):
     return _score(conn, repo.list_alerts(conn, str(client_id)))
 
 
+# this adds a target so that it can be scored against each new forecast
 @router.post("", response_model=Alert, status_code=status.HTTP_201_CREATED)
 def create_alert(alert: AlertIn, conn: Connection = Depends(get_connection)):
     cid = str(alert.client_id)
+    # this rejects duplicates and caps the list so that one client cannot fill the table
     if repo.find_alert(conn, cid, alert.category, alert.direction, alert.target):
         raise HTTPException(status_code=409, detail=f"You're already watching Cat {alert.category} "
                                                     f"{alert.direction} ${alert.target:,}.")
@@ -58,6 +65,7 @@ def create_alert(alert: AlertIn, conn: Connection = Depends(get_connection)):
     return _score(conn, [row])[0]
 
 
+# this removes a target, the client id must match so that nobody can delete someone else's
 @router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_alert(alert_id: int, client_id: UUID, conn: Connection = Depends(get_connection)):
     if not repo.delete_alert(conn, alert_id, str(client_id)):

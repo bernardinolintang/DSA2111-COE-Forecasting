@@ -14,6 +14,7 @@ import {
   CATEGORY_CODES, ICONS, clientId, errorBox, html, money, mount, onSegment, parseMoney, raw, segmented, toast,
 } from "../util.js";
 
+// these are the status labels so that each one has its own wording and style
 const STATUS = {
   triggered: { cls: "pill-buy", text: "Reached", help: "The latest premium has already crossed your target." },
   likely: { cls: "pill-accent", text: "Likely", help: "50% or higher chance within the next quota quarter." },
@@ -21,6 +22,7 @@ const STATUS = {
   unlikely: { cls: "pill-neutral", text: "Unlikely", help: "Under 20% chance within the next quota quarter." },
 };
 
+// this draws one target so that all rows look the same
 function alertCard(a) {
   const s = STATUS[a.status];
   const outlook = a.status === "triggered"
@@ -45,6 +47,7 @@ function alertCard(a) {
     </div>`;
 }
 
+// this draws the page and returns a cleanup function so that the router can remove it later
 export async function render(root) {
   const cid = clientId();
   const form = { category: "A", direction: "below" };
@@ -116,6 +119,7 @@ export async function render(root) {
     return message ? null : r.value;
   }
 
+  // these connect the form so that any change is checked right away
   onSegment(root, "a-cat", (c) => { form.category = c; validate(); });
   onSegment(root, "a-dir", (d) => { form.direction = d; validate(); });
   targetInput.addEventListener("input", () => { resetSubmit(); validate(); });
@@ -126,7 +130,8 @@ export async function render(root) {
   });
 
   const list = root.querySelector("#alerts");
-  /** animate: new targets fade in and the others glide to their new places. */
+  // this keeps the list fresh, with animate new targets fade in and the others glide to their new
+  // places so that the change is easy to follow
   async function load({ animate = false } = {}) {
     try {
       alerts = await api.get(`/alerts?client_id=${cid}`, { fresh: true });
@@ -146,6 +151,7 @@ export async function render(root) {
     validate();
   }
 
+  // this saves a new target so that it can be re-scored after each exercise
   root.querySelector("#alert-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     touched = true;
@@ -170,7 +176,8 @@ export async function render(root) {
     } finally {
       busy = false;
       if (added) {
-        // A short, calm confirmation on the button itself, then back to normal.
+        // a short calm confirmation on the button itself, then back to normal so that the user
+        // knows it worked
         submit.innerHTML = `${ICONS.check}Added`;
         submit.classList.add("is-done");
         doneTimer = setTimeout(resetSubmit, 1400);
@@ -181,7 +188,8 @@ export async function render(root) {
     }
   });
 
-  // Removing asks for confirmation inline (no modal), and is reversible by re-adding.
+  // removing asks for confirmation inline (no modal) so that it is hard to do by accident, and it
+  // can be undone by adding the target again
   list.addEventListener("click", async (e) => {
     const card = e.target.closest("[data-alert]");
     if (!card) return;
@@ -208,7 +216,8 @@ export async function render(root) {
       try {
         await api.del(`/alerts/${id}?client_id=${cid}`);
         toast("Removed from your watchlist");
-        // Only after the removal succeeded: the row collapses and the rows below slide up.
+        // only after the removal succeeded the row collapses and the rows below slide up so that a
+        // failed delete does not look done
         await collapse(card, { gap: 16 });
         await load({ animate: true });
       } catch (err) {
@@ -219,9 +228,11 @@ export async function render(root) {
     }
   });
 
-  // Browser notifications: optional, only while COE Compass is open in a tab.
+  // browser notifications are optional and only work while COE Compass is open in a tab so that the
+  // page never promises more than it can do
   const notifyText = root.querySelector("#notify-text");
   const notifyBtn = root.querySelector("#notify-toggle");
+  // this shows the notification state so that the button says what a click will do
   function paintNotify() {
     if (!("Notification" in window)) {
       notifyText.textContent = "This browser doesn't support notifications. You'll still see changes here and on the next visit.";
@@ -243,8 +254,10 @@ export async function render(root) {
   });
   paintNotify();
 
+  // this reloads when the analyst changes the list so that the page stays current
   const onChanged = () => load({ animate: true });
   document.addEventListener("coe:watchlist-changed", onChanged);
   await load();
+  // this cleans up when leaving so that the timer and listener stop
   return () => { clearTimeout(doneTimer); document.removeEventListener("coe:watchlist-changed", onChanged); };
 }

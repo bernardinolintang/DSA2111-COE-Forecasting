@@ -14,6 +14,7 @@ from ..services import repository as repo
 router = APIRouter(tags=["policy"])
 
 
+# this joins each policy event with its estimated effects so that the Policy Lab needs one call
 @router.get("/policy/events", response_model=list[PolicyEvent])
 def policy_events(conn: Connection = Depends(get_connection)):
     run = repo.latest_run(conn)
@@ -23,6 +24,7 @@ def policy_events(conn: Connection = Depends(get_connection)):
             effects[e["event_code"]].append({
                 "category": e["category"], "pct_effect": e["pct_effect"], "pct_low": e["pct_low"],
                 "pct_high": e["pct_high"], "p_value": e["p_value"],
+                # this flags p below 0.05 so that the page can show which effects are significant
                 "significant": e["p_value"] is not None and e["p_value"] < 0.05,
             })
     return [{**event, "categories": list(event["categories"]), "effects": effects.get(event["code"], [])}

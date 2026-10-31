@@ -5,6 +5,7 @@ import { expect, test } from "./fixtures.js";
 
 const money = (v) => `$${Math.round(v).toLocaleString("en-SG")}`;
 
+// this checks a category switch so that a name is never shown beside another category's numbers
 test("switching category updates the Forecast in place and never mixes categories", async ({ page, request, problems }) => {
   const c = await (await request.get("/api/forecast/C?scenario=base")).json();
   await page.goto("/#/forecast/A");
@@ -34,6 +35,7 @@ test("switching category updates the Forecast in place and never mixes categorie
   expect(problems).toEqual([]);
 });
 
+// this checks the Scenario Lab wording so that the effect is in words too
 test("Scenario Lab: a modelled scenario states its effect in words next to the expected premium", async ({ page, request }) => {
   const [base, plus] = await Promise.all(["base", "quota_plus_20"].map(async (s) =>
     (await request.get(`/api/forecast/A?scenario=${s}`)).json()));
@@ -58,6 +60,7 @@ test("Scenario Lab: a modelled scenario states its effect in words next to the e
   await expect(page).toHaveURL(/#\/scenario\/A$/);
 });
 
+// this checks the slider against the API so that browser and server maths agree
 test("Scenario Lab: dragging the slider recalculates in place and agrees with the API", async ({ page, request, problems }) => {
   const api15 = await (await request.get("/api/forecast/A?quota_pct=15")).json();
   const base = await (await request.get("/api/forecast/A")).json();
@@ -95,6 +98,7 @@ test("Scenario Lab: dragging the slider recalculates in place and agrees with th
   expect(problems).toEqual([]);
 });
 
+// this checks zoom so that Ctrl + scroll zooms the chart and not the page
 test("the forecast chart zooms with Ctrl + scroll (not the page) and zooms back", async ({ page, problems }) => {
   await page.goto("/#/forecast/A");
   await expect(page.locator("#steps tbody tr")).toHaveCount(6);
@@ -138,6 +142,7 @@ test("the forecast chart zooms with Ctrl + scroll (not the page) and zooms back"
   expect(problems).toEqual([]);
 });
 
+// this checks the shared transition so that the card and page show the same figures
 test("Overview card opens its forecast with the same figures (shared transition)", async ({ page, problems }) => {
   await page.goto("/");
   const card = page.locator("#cards .cat-card").nth(1);
@@ -156,6 +161,7 @@ test("Overview card opens its forecast with the same figures (shared transition)
   expect(problems).toEqual([]);
 });
 
+// this checks the bid page in place so that the marker follows the bid
 test("Bid planner changes category in place and the marker follows the bid", async ({ page, request }) => {
   const e = await (await request.get("/api/bid-planner/E")).json();
   await page.goto("/#/bid/A");
@@ -175,6 +181,7 @@ test("Bid planner changes category in place and the marker follows the bid", asy
   await expect(page.locator("#bid-input")).toHaveValue(Math.round(top.bid).toLocaleString("en-SG"));
 });
 
+// this checks the Policy Lab so that picking an event shows it on the chart with words
 test("Policy Lab: choosing an event shows it on the chart with its impact in words", async ({ page }) => {
   await page.goto("/#/policy/B");
   const chip = page.locator("#event-picker [data-pick]").first();
@@ -198,9 +205,11 @@ test("Policy Lab: choosing an event shows it on the chart with its impact in wor
   await expect(page.locator("#policy-focus")).toBeVisible();
 });
 
+// these repeat the checks with reduced motion so that nothing depends on animation
 test.describe("reduced motion", () => {
   test.use({ reducedMotion: "reduce" });
 
+  // this checks changes still land so that no one misses an update with motion off
   test("every change still lands, immediately and with the right values", async ({ page, request, problems }) => {
     const minus = await (await request.get("/api/forecast/B?scenario=quota_minus_20")).json();
     await page.goto("/#/scenario/B");

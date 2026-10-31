@@ -8,7 +8,8 @@ const path = require("path");
 
 const OUT = process.argv[2] || path.join(__dirname, "..", "figures");
 const BASE = process.env.E2E_BASE_URL || "http://localhost:8080";
-// [file name, route, vertical scroll in CSS pixels]
+// each entry is [file name, route, vertical scroll in CSS pixels] so that the same shots can be
+// retaken
 const PAGES = [
   ["ui_forecast", "#/forecast/A", 300],      // key figures with the market outlook, then the fan chart
   ["ui_bid", "#/bid/A", 360],
@@ -19,11 +20,12 @@ const PAGES = [
   const context = await browser.newContext({
     viewport: { width: 900, height: 700 }, deviceScaleFactor: 3, colorScheme: "light",
   });
-  // Light theme, and no first-visit tour offer covering the page.
+  // this sets a light theme and hides the tour offer so that the screenshots stay clean
   await context.addInitScript(() => {
     localStorage.setItem("coe-theme", JSON.stringify("light"));
     localStorage.setItem("coe-tour-seen", JSON.stringify(true));
   });
+  // this visits each page and waits for it to settle so that the shots are not caught mid animation
   const page = await context.newPage();
   for (const [name, hash, scroll] of PAGES) {
     await page.goto(`${BASE}/${hash}`);

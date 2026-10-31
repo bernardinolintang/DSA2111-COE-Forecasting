@@ -4,12 +4,15 @@
 #
 #   docker login
 #   DOCKERHUB_USER=yourname TAG=v1 bash scripts/push_dockerhub.sh
+# this stops on any error so that a failed push is not missed
 set -euo pipefail
 
+# this requires a username so that images cannot go to the wrong account
 cd "$(dirname "$0")/.."
 : "${DOCKERHUB_USER:?set DOCKERHUB_USER to your Docker Hub username}"
 TAG="${TAG:-v1}"
 
+# this builds all images then tags and pushes each one so that the three versions always match
 docker compose build
 for name in api web ml; do
   docker tag "coe-$name:latest" "$DOCKERHUB_USER/coe-$name:$TAG"

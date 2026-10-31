@@ -23,17 +23,21 @@ from . import config
 
 log = logging.getLogger(__name__)
 
+# these are the API addresses and the COE dataset id so that they only need changing here if a
+# source moves
 DATAGOV_URL = "https://data.gov.sg/api/action/datastore_search"
 COE_RESOURCE_ID = "d_69b3380ad7e51aff3a7dcc84eba52b8a"   # "COE Bidding Results / Prices"
 SINGSTAT_URL = "https://tablebuilder.singstat.gov.sg/api/table/tabledata/{table_id}"
 
-# (indicator name, SingStat table id, row text, frequency)
+# this lists each macro series as (indicator name, SingStat table id, row text, frequency) so that
+# fetch_macro can download them all in one loop
 MACRO_SERIES = [
     ("cpi_all_items", "M213751", "All Items", "M"),
     ("sora_3m", "M700071", "Compounded Singapore Overnight Rate Average (SORA) - 3 Month", "M"),
     ("gdp_real", "M015661", "GDP In Chained (2015) Dollars", "Q"),
 ]
 
+# this sets a timeout and says who is calling so that a stuck API cannot hang the pipeline
 TIMEOUT = 30
 HEADERS = {"User-Agent": "coe-forecasting/1.0 (NUS DSA2111 student project)"}
 
@@ -43,12 +47,14 @@ HEADERS = {"User-Agent": "coe-forecasting/1.0 (NUS DSA2111 student project)"}
 # ---------------------------------------------------------------------------
 def fetch_coe_results(page_size: int = 1000) -> pd.DataFrame:
     """Download every COE bidding result from data.gov.sg (paginated)."""
+    # this adds the api key only if we have one so that the public endpoint still works without it
     headers = dict(HEADERS)
     if config.DATAGOV_API_KEY:
         headers["x-api-key"] = config.DATAGOV_API_KEY
 
     records: list[dict] = []
     offset = 0
+    # this keeps asking for the next page until the API runs out so that no result is missed
     while True:
         params = {"resource_id": COE_RESOURCE_ID, "limit": page_size, "offset": offset}
         resp = requests.get(DATAGOV_URL, params=params, headers=headers, timeout=TIMEOUT)
@@ -73,13 +79,19 @@ def clean_coe_results(raw: pd.DataFrame) -> pd.DataFrame:
         }
     )
     for col in ["quota", "bids_success", "bids_received", "premium"]:
-        # Values arrive as strings and occasionally contain thousands separators.
+        # values come as strings with thousands separators, this removes them so that they can
+        # become numbers
         df[col] = pd.to_numeric(raw[col].astype(str).str.replace(",", ""), errors="coerce")
+    # this drops rows with no premium or an unknown category so that only real Cat A-E results
+    # remain
     df = df.dropna(subset=["premium"])
     df = df[df["category"].isin(config.CATEGORIES)]
+    # this fills missing counts with 0 and makes them integers so that they fit the database columns
     df[["quota", "bids_success", "bids_received", "premium"]] = (
         df[["quota", "bids_success", "bids_received", "premium"]].fillna(0).astype(int)
     )
+    # this keeps the latest copy of each result and sorts by date so that each exercise has one
+    # clean row
     return (
         df.drop_duplicates(subset=["month", "bidding_no", "category"], keep="last")
         .sort_values(["month", "bidding_no", "category"])
@@ -95,6 +107,7 @@ def _parse_singstat_key(key: str, freq: str) -> date:
     year, period = key.split()
     if freq == "M":
         return pd.to_datetime(f"{year} {period}", format="%Y %b").date()
+    # this uses the last month of the quarter so that quarterly GDP sits on a normal monthly date
     quarter = int(period[0])
     return date(int(year), quarter * 3, 1)
 
@@ -105,9 +118,12 @@ def fetch_singstat_series(table_id: str, row_text: str, freq: str) -> pd.Series:
     resp = requests.get(url, params={"limit": 5000}, headers=HEADERS, timeout=TIMEOUT)
     resp.raise_for_status()
     rows = resp.json()["Data"]["row"]
+    # this matches the row by its exact text so that a renamed row fails loudly instead of giving
+    # wrong data
     matches = [r for r in rows if r["rowText"].strip() == row_text]
     if not matches:
         raise KeyError(f"row {row_text!r} not found in SingStat table {table_id}")
+    # this skips blank and "na" cells so that only real numbers are kept
     points = {
         _parse_singstat_key(col["key"], freq): float(col["value"])
         for col in matches[0]["columns"]
@@ -119,6 +135,8 @@ def fetch_singstat_series(table_id: str, row_text: str, freq: str) -> pd.Series:
 def fetch_macro() -> pd.DataFrame:
     """Download all macro series into long format (month, indicator, value, source)."""
     frames = []
+    # this loops over every series and tags its source so that they can all be saved in one long
+    # table
     for name, table_id, row_text, freq in MACRO_SERIES:
         series = fetch_singstat_series(table_id, row_text, freq)
         frames.append(
@@ -138,15 +156,18 @@ def fetch_macro() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Snapshot fallback
 # ---------------------------------------------------------------------------
+# this builds the csv path so that saving and reading always use the same file
 def _snapshot_path(name: str) -> Path:
     return config.SNAPSHOT_DIR / f"{name}.csv"
 
 
+# this writes a csv copy so that later runs can work offline
 def _save_snapshot(df: pd.DataFrame, name: str) -> None:
     config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     df.to_csv(_snapshot_path(name), index=False)
 
 
+# this reads a csv copy and restores the dates so that it looks the same as a live download
 def _read_snapshot(name: str) -> pd.DataFrame:
     df = pd.read_csv(_snapshot_path(name))
     df["month"] = pd.to_datetime(df["month"]).dt.date
@@ -155,6 +176,8 @@ def _read_snapshot(name: str) -> pd.DataFrame:
 
 def load_coe_results(offline: bool = False) -> pd.DataFrame:
     """Live COE results, falling back to the committed snapshot on any failure."""
+    # this tries the live API first and saves a fresh copy so that the snapshot is only used when
+    # the download fails
     if not offline:
         try:
             df = fetch_coe_results()
@@ -167,6 +190,7 @@ def load_coe_results(offline: bool = False) -> pd.DataFrame:
 
 def load_macro(offline: bool = False) -> pd.DataFrame:
     """Live macro indicators, falling back to the committed snapshot on any failure."""
+    # this does the same for the macro data so that both sources fall back the same way
     if not offline:
         try:
             df = fetch_macro()

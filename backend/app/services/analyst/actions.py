@@ -18,6 +18,7 @@ from ...labels import CATEGORIES, SCENARIOS
 from .. import scenarios as sc
 from .context import PAGES
 
+# these are the page parts the analyst can point at so that it can only highlight things that exist
 CATS = list(CATEGORIES)
 HIGHLIGHTS = {
     "category-cards": "the five category cards",
@@ -34,13 +35,16 @@ HIGHLIGHTS = {
     "error-by-horizon": "the error-by-horizon chart",
     "watchlist-form": "the watchlist form",
 }
+# this is the largest target allowed so that a typo cannot store a silly number
 MAX_TARGET = 999_999
 
 
+# this error means an action was rejected so that callers can show the reason
 class ActionError(ValueError):
     pass
 
 
+# this is one validated action so that the server and browser share a clear shape
 @dataclass
 class Action:
     type: str
@@ -52,6 +56,7 @@ class Action:
         return {"type": self.type, "params": self.params, "confirm": self.confirm, "summary": self.summary}
 
 
+# this formats dollars so that messages look the same everywhere
 def _money(v: float) -> str:
     return f"${v:,.0f}"
 
@@ -59,7 +64,9 @@ def _money(v: float) -> str:
 # ---------------------------------------------------------------------------
 # Tool definitions (JSON schema) shown to the model
 # ---------------------------------------------------------------------------
+# this is the shared category field so that each tool below defines it the same way
 _cat = {"type": "string", "enum": CATS, "description": "COE category code."}
+# these tools act on the page, the browser runs them so that the model never touches the page itself
 UI_TOOLS = [
     {
         "name": "navigate",
@@ -153,6 +160,7 @@ UI_TOOLS = [
     },
 ]
 
+# these tools read numbers from the server so that the model never does the maths itself
 DATA_TOOLS = [
     {
         "name": "bid_win_probability",
@@ -213,11 +221,12 @@ DATA_TOOLS = [
     },
 ]
 
+# these name sets are there so that the loop can tell if a call is a UI tool or a data tool
 UI_TOOL_NAMES = {t["name"] for t in UI_TOOLS}
 DATA_TOOL_NAMES = {t["name"] for t in DATA_TOOLS}
 
-# For providers whose prompt is kept compact (Groq), the glossary is looked up on demand
-# instead of being sent with every question.
+# this is for providers whose prompt is kept compact (Groq), the glossary is looked up on demand so
+# that it is not sent with every question
 EXPLAIN_TOOL = {
     "name": "explain_term",
     "description": "This app's plain-language and technical definition of a term shown in the UI.",
@@ -234,6 +243,7 @@ EXPLAIN_TOOL = {
 # Validation: every UI action goes through here, whether it came from the
 # model or from the offline intent parser.
 # ---------------------------------------------------------------------------
+# this cleans up "Cat a" style input so that the model can name a category in different ways
 def _category(value, required=True) -> str | None:
     if value is None and not required:
         return None
@@ -243,6 +253,7 @@ def _category(value, required=True) -> str | None:
     return code
 
 
+# this checks an amount is a sensible number so that bad values are rejected with a clear reason
 def _amount(value, what="amount") -> int:
     try:
         v = float(value)
@@ -270,15 +281,18 @@ def quota_pct(p: dict) -> int:
 
 def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> Action:
     """``alerts``: the viewer's watchlist by id, used to check removal requests."""
+    # this copies the params so that the original is never changed
     p = dict(params or {})
     if name == "navigate":
         page = p.get("page")
         if page not in PAGES:
             raise ActionError(f"Unknown page {page!r}.")
+        # this sends supply what-ifs to the Scenario Lab so that the user lands where the slider is
         if page == "forecast" and p.get("scenario") not in (None, "base"):
             page = "scenario"                 # supply what-ifs live in the Scenario Lab
         out = {"page": page}
         cat = _category(p.get("category"), required=False)
+        # this only passes category to pages that use it so that the link stays clean
         if cat and page in ("forecast", "scenario", "bid", "policy"):
             out["category"] = cat
         if page == "scenario" and p.get("scenario"):
@@ -292,6 +306,7 @@ def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> 
         where = PAGES[page] + (f" for Cat {out['category']}" if "category" in out else "")
         return Action("navigate", out, False, f"Open {where}")
 
+    # this turns a scenario request into a slider value so that the browser only needs one format
     if name == "set_supply_scenario":
         pct = quota_pct(p)
         out = {"quota_pct": pct}
@@ -314,12 +329,14 @@ def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> 
             raise ActionError("Unknown highlight target.")
         return Action(name, {"target": p["target"]}, False, f"Highlight {HIGHLIGHTS[p['target']]}")
 
+    # this falls back to step 1 on a bad step so that the tour always starts
     if name == "open_tutorial":
         step = p.get("step", 1)
         if not isinstance(step, int) or not 1 <= step <= 7:
             step = 1
         return Action(name, {"step": step}, False, "Start the guided tour" + (f" at step {step}" if step > 1 else ""))
 
+    # this drafts a target with confirm on so that nothing is saved until the user presses Confirm
     if name == "prepare_watch":
         cat = _category(p.get("category"))
         direction = p.get("direction")
@@ -330,6 +347,7 @@ def validate(name: str, params: dict, alerts: dict[int, dict] | None = None) -> 
         return Action(name, {"category": cat, "direction": direction, "target": target, "note": note}, True,
                       f"Watch Cat {cat} {direction} {_money(target)}")
 
+    # this checks the id is on this user's list so that the model cannot remove anything else
     if name == "prepare_remove_watch":
         try:
             alert_id = int(p.get("id"))

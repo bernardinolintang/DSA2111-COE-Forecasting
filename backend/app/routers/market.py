@@ -19,6 +19,7 @@ from .common import require_category, with_label
 router = APIRouter(tags=["market"])
 
 
+# this lists the categories so that the front end does not hard code them
 @router.get("/categories", response_model=list[Category])
 def categories():
     return [{"code": code, **meta} for code, meta in CATEGORIES.items()]
@@ -28,20 +29,24 @@ def categories():
 def summary(conn: Connection = Depends(get_connection)):
     """Everything the home page and the market status bar need in a single request."""
     run = repo.latest_run(conn)
+    # this groups the last 25 exercises per category so that each card has its sparkline
     recent = defaultdict(list)
     for row in repo.latest_exercises(conn, n=25):
         recent[row["category"]].append(row)            # newest first
 
+    # this groups the forecasts per category so that each card can find its own
     forecasts = defaultdict(list)
     if run:
         for row in repo.forecasts_all(conn, run["id"]):
             forecasts[row["category"]].append(row)
 
     cards, data_through, next_exercise = [], None, None
+    # this builds one card per category so that the home page needs a single request
     for code, meta in CATEGORIES.items():
         rows = recent.get(code)
         if not rows:
             continue
+        # this keeps both the latest and previous result so that the card can show the change
         latest, previous = rows[0], rows[1] if len(rows) > 1 else None
         data_through = data_through or with_label(latest)
         year_ago = repo.premium_year_ago(conn, code, latest["month"], latest["bidding_no"])
@@ -57,6 +62,8 @@ def summary(conn: Connection = Depends(get_connection)):
             "horizon_q10": None, "horizon_q50": None, "horizon_q90": None,
             "horizon_label": None, "signal": None,
         }
+        # this adds the forecast parts only when a forecast exists so that the history still shows
+        # without one
         steps = forecasts.get(code)
         if steps:
             advice = advise(meta["name"], latest["premium"], steps, list(reversed(rows)), settings.wait_threshold)
@@ -75,6 +82,7 @@ def history(category: str, years: int = Query(5, ge=0, le=30, description="0 = f
             conn: Connection = Depends(get_connection)):
     category = require_category(category)
     since = None
+    # this works out the start date from the year count so that 0 can mean the full history
     if years:
         today = date.today()
         since = date(today.year - years, today.month, 1)
@@ -85,11 +93,13 @@ def history(category: str, years: int = Query(5, ge=0, le=30, description="0 = f
 def macro(years: int = Query(10, ge=1, le=30), conn: Connection = Depends(get_connection)):
     """Monthly CPI, 3-month SORA and real GDP (quarterly) for the context charts."""
     today = date.today()
+    # this groups the rows by indicator so that each chart gets its own series
     series = defaultdict(list)
     for row in repo.macro(conn, date(today.year - years - 1, 1, 1)):
         series[row["indicator"]].append({"month": row["month"], "value": row["value"]})
     cpi = series.get("cpi_all_items", [])
     by_month = {p["month"]: p["value"] for p in cpi}
+    # this turns CPI into yearly inflation so that the chart shows a rate
     inflation = [
         {"month": p["month"], "value": round((p["value"] / by_month[prev] - 1) * 100, 2)}
         for p in cpi

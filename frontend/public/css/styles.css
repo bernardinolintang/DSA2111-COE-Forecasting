@@ -42,13 +42,13 @@
   --shadow: 0 1px 2px rgba(11, 31, 51, 0.05);
   --shadow-hover: 0 2px 4px rgba(11, 31, 51, 0.06), 0 10px 24px rgba(11, 31, 51, 0.10);
   --shadow-pop: 0 12px 40px rgba(11, 31, 51, 0.20), 0 0 0 1px var(--hairline);
-  /* Category colours (validated categorical palette, fixed order A-E). */
+  /* these are the category colours in a fixed order so that Cat A is always the same colour */
   --cat-A: #2a78d6;
   --cat-B: #eb6834;
   --cat-C: #1baf7a;
   --cat-D: #eda100;
   --cat-E: #e87ba4;
-  /* Diverging pair for policy effects: price fell <-> price rose. */
+  /* this is the diverging pair for policy effects so that a fall and a rise look different */
   --down: #2a78d6;
   --up: #e34948;
 
@@ -256,7 +256,7 @@ a.status-meta:hover { color: var(--on-brand); }
 }
 .icon-btn:hover { background: var(--surface-sunk); color: var(--ink); }
 
-/* Ask Compass: the analyst's entry point, on every page */
+/* this styles the Ask Compass button so that the analyst's entry point stands out on every page */
 .ask-btn {
   display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; margin-right: 4px; cursor: pointer;
   border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-wash); color: var(--accent-ink);
@@ -266,7 +266,7 @@ a.status-meta:hover { color: var(--on-brand); }
 .ask-btn svg { width: 16px; height: 16px; }
 .ask-btn:hover, .ask-btn[aria-expanded="true"] { background: var(--accent); color: var(--on-accent); }
 
-/* Section tabs (Plan, Explore, Learn) */
+/* this styles the section tabs so that Plan, Explore and Learn pages are easy to switch */
 .subnav { background: var(--surface); border-bottom: 1px solid var(--hairline); }
 .subnav-inner {
   max-width: var(--max); margin: 0 auto; padding: 0 22px; list-style: none; display: flex; gap: 4px;
@@ -282,7 +282,7 @@ a.status-meta:hover { color: var(--on-brand); }
 .subnav .nav-badge { position: static; display: inline-block; margin-left: 6px; vertical-align: 1px; }
 
 @media (min-width: 601px) {
-  /* The status bar and the navigation stay pinned together. */
+  /* this pins the status bar and navigation together so that both stay in view */
   .statusbar { position: sticky; top: 0; z-index: 106; }
   .nav { top: var(--status-h); z-index: 105; }
 }
@@ -304,7 +304,7 @@ main { min-height: calc(100vh - var(--header-h)); }
 .container { max-width: var(--max); margin: 0 auto; padding: 0 22px; }
 @media (max-width: 600px) { .container { padding: 0 16px; } }
 
-/* Vertical padding only, so the .container side gutters are kept. */
+/* this uses vertical padding only so that the .container side gutters are kept */
 .section { padding-top: 48px; padding-bottom: 48px; }
 .section-tight { padding-top: 24px; padding-bottom: 24px; }
 
@@ -376,7 +376,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .card:focus-visible { border-radius: var(--radius); }   /* keep the card's corners when focused */
 .cat-link { color: var(--accent-ink); font-size: 14px; font-weight: 600; margin-top: auto; }
 
-/* Category card on the overview: a short story, not just numbers */
+/* this is the category card on the overview so that it tells a short story and not just numbers */
 .card.cat-card { display: flex; flex-direction: column; gap: 12px; padding: 18px; }
 .cat-top { display: grid; gap: 1px; }
 .cat-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 15px; font-weight: 700; white-space: nowrap; }
@@ -393,13 +393,13 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .delta.down { color: var(--accent-ink); }
 .delta.flat { color: var(--ink-2); }
 
-/* Why: the drivers behind an outlook, as small chips */
+/* these are the drivers behind an outlook so that the reason shows as small chips */
 .drivers { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; }
 .driver {
   font-size: 12px; letter-spacing: 0; padding: 2px 8px; border-radius: 6px; background: var(--surface-sunk); color: var(--ink-2); white-space: nowrap;
 }
 
-/* "What are you planning?" */
+/* this is the "What are you planning?" block so that visitors can start from their goal */
 .card.intent { display: flex; flex-direction: column; gap: 6px; }
 .intent strong { font-size: 17px; letter-spacing: -0.015em; }
 .intent-body { font-size: 14px; color: var(--ink-2); }
@@ -447,7 +447,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .link-arrow { font-weight: 600; font-size: 15px; }
 .link-arrow::after { content: " →"; }
 
-/* Segmented control */
+/* this is the segmented control so that pages can offer a small set of choices */
 .segmented {
   position: relative; display: inline-flex; background: var(--surface-sunk); border-radius: 9px; padding: 2px; gap: 2px;
   max-width: 100%; overflow-x: auto; scrollbar-width: none;
@@ -461,7 +461,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .segmented button:hover { color: var(--ink); }
 .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(11,31,51,.16), 0 0 0 .5px rgba(11,31,51,.06); }
 
-/* One filter row above the content it scopes */
+/* this is one filter row above the content it scopes so that the link between them is clear */
 .filters { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin: 24px 0 16px; }
 .filter { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
 .filter-label { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
@@ -479,13 +479,13 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .page-head { padding-top: 36px; }
 .page-head .subtitle { font-size: 17px; }
 
-/* Stats strip */
+/* this is the stats strip so that key results are easy to scan */
 .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
 @media (max-width: 820px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .stat .stat-value { font-family: var(--font-display); font-size: clamp(28px, 3.4vw, 38px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; }
 .stat .stat-label { color: var(--ink-2); font-size: 14px; margin-top: 6px; letter-spacing: -0.006em; }
 
-/* Steps: how the forecasts are made */
+/* these are the steps of how forecasts are made so that the process reads left to right */
 .pipeline { list-style: none; margin-left: 0; margin-bottom: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 1000px) { .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .pipeline { grid-template-columns: minmax(0, 1fr); } }
@@ -530,7 +530,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .kv dt { font-size: 12px; color: var(--ink-2); margin: 0 0 2px; letter-spacing: 0; }
 .kv dd { margin: 0; font-weight: 600; font-size: 16px; letter-spacing: -0.015em; }
 
-/* Forecast details: when, what data, which model, which source */
+/* these are the forecast details so that users can see when, what data, which model and source */
 .provenance {
   margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--hairline); display: flex; flex-wrap: wrap; gap: 4px 20px;
   font-size: 12.5px; letter-spacing: 0; color: var(--ink-2);
@@ -586,7 +586,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 
 .table-toggle { font-size: 13px; }
 
-/* Horizontal bar list (leaderboards, variable importance) */
+/* this is the horizontal bar list so that leaderboards and variable importance can be compared */
 .barlist { display: grid; gap: 10px; }
 .barlist-row { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr) 84px; gap: 12px; align-items: center; font-size: 14px; letter-spacing: -0.006em; }
 .barlist-label { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -597,7 +597,7 @@ a.card:active { transform: none; transition-duration: var(--dur-micro); }
 .barlist-row.is-highlight .barlist-value { color: var(--ink); font-weight: 600; }
 @media (max-width: 520px) { .barlist-row { grid-template-columns: minmax(96px, 38%) minmax(0, 1fr) 70px; font-size: 13px; } }
 
-/* Data tables */
+/* these are the data tables so that numbers line up */
 .table-wrap { overflow-x: auto; margin: 0 -4px; }
 .table-wrap.card { margin: 0; padding: 8px 12px; }
 table.data { width: 100%; border-collapse: collapse; font-size: 14px; letter-spacing: -0.006em; }
@@ -641,7 +641,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .chip .chip-top { font-size: 12px; color: var(--ink-2); letter-spacing: 0; }
 .chip .chip-val { font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
 
-/* Nearby bids: "$98,000 → 41%" */
+/* these are the nearby bids so that the chance at each one can be seen at a glance */
 .ladder { display: grid; gap: 4px; }
 .ladder-row {
   display: grid; grid-template-columns: 92px minmax(0, 1fr) 44px; gap: 12px; align-items: center; width: 100%;
@@ -766,7 +766,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .empty-icon svg { width: 36px; height: 36px; }
 .error-box { border-radius: var(--radius); padding: 16px 20px; background: var(--danger-wash); color: var(--danger); font-size: 15px; }
 
-/* A notice says what happened, what still works, and what to do. */
+/* this is a notice so that it says what happened, what still works and what to do */
 .notice {
   display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap;
   border: 1px solid var(--hairline); border-left: 3px solid var(--ink-3); border-radius: var(--radius-sm);
@@ -805,7 +805,8 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
    technical sections. Same tokens as above.
    ========================================================================== */
 
-/* Explain (i) buttons: 18px visual, 28px hit area */
+/* these are the explain (i) buttons, 18px visual and 28px hit area so that they are easy to */
+/* press */
 .explain {
   display: inline-grid; place-items: center; width: 18px; height: 18px; margin: 0 2px; padding: 0; vertical-align: 1px;
   border: 0; border-radius: 50%; background: var(--surface-sunk); color: var(--ink-2); cursor: pointer; position: relative;
@@ -824,7 +825,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .pop-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .pop-head .icon-btn { width: 30px; height: 30px; margin: -6px -8px 0 0; }
 
-/* Help menu */
+/* this is the Help menu so that it sits neatly under its button */
 .help-wrap { position: relative; }
 .help-menu {
   position: absolute; right: 0; top: 44px; width: 280px; z-index: 110; background: var(--surface); border-radius: var(--radius); padding: 6px;
@@ -841,7 +842,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
   background: var(--amber); color: #0b1f33; font-size: 11px; font-weight: 700; line-height: 16px; text-align: center;
 }
 
-/* Glossary dialog */
+/* this is the glossary dialog so that all terms can be read in one place */
 .dialog { border: 0; border-radius: var(--radius-lg); padding: 0; width: min(640px, calc(100% - 32px)); max-height: min(80vh, 760px);
   background: var(--surface); color: var(--ink); box-shadow: 0 24px 80px rgba(0,0,0,.35); }
 .dialog::backdrop { background: rgba(4, 13, 22, .55); }
@@ -850,7 +851,8 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .glossary-item summary { cursor: pointer; font-weight: 600; }
 .glossary-item p { margin: 8px 0 0; font-size: 15px; }
 
-/* Highlight a region the analyst or a deep link points at */
+/* this highlights a region the analyst or a deep link points at so that the eye goes straight to */
+/* it */
 [data-anchor], .event { scroll-margin-top: calc(var(--header-h) + 20px); }
 .is-highlighted { animation: pulse-ring 2.4s var(--ease) 1; }
 @keyframes pulse-ring {
@@ -860,7 +862,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .event.is-highlighted { animation: none; }
 .event.is-highlighted .card { animation: pulse-ring 2.4s var(--ease) 1; }
 
-/* Forms: validation, disabled, danger */
+/* these are form states (validation, disabled, danger) so that each is obvious */
 .btn:disabled, .btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; transform: none; }
 .btn-danger { background: var(--danger); color: #fff; }
 .field-grow { flex: 1; min-width: 140px; }
@@ -868,7 +870,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .field > input[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-wash); }
 .money-input:has(input[aria-invalid="true"]) { border-color: var(--danger); }
 
-/* Watchlist */
+/* this is the watchlist so that targets are easy to scan */
 .alert-facts { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; font-size: 14px; }
 .alert-facts div { display: flex; gap: 6px; }
 .alert-facts dt { color: var(--ink-2); }
@@ -876,7 +878,8 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .alert-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 600px) { .alert-item { grid-template-columns: minmax(0, 1fr); } .alert-actions { justify-content: flex-start; } }
 
-/* Policy Lab plain language + technical sections */
+/* these are Policy Lab sections so that plain language comes first and the stats stay one click */
+/* away */
 .plain { font-size: 15px; margin-bottom: 0; }
 .effect-row.is-selected { background: var(--accent-wash); border-radius: var(--radius-sm); padding-left: 6px; padding-right: 6px; }
 .source-link { font-size: 14px; font-weight: 600; }
@@ -891,7 +894,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .tech-section > summary .title { font-size: 19px; }
 @media (max-width: 600px) { .tech-section > summary { padding: 18px 76px 18px 18px; } .tech-section > summary::after { right: 18px; top: 20px; } }
 
-/* Model trust summary */
+/* this is the model trust summary so that the result shows before the detail */
 .trust-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 960px) { .trust-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .trust-grid { grid-template-columns: minmax(0, 1fr); } }
@@ -899,10 +902,10 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .trust-label { font-size: 13px; color: var(--ink-2); }
 .trust-value { font-family: var(--font-display); font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; }
 
-/* Charts: empty state */
+/* this is the empty chart state so that a chart with no data still explains itself */
 .chart .empty-label { font-size: 14px; fill: var(--ink-2); }
 
-/* Touch targets on coarse pointers */
+/* these are touch targets on coarse pointers so that buttons are easy to press on phones */
 @media (pointer: coarse) {
   .segmented button { padding: 9px 14px; }
   .icon-btn, .ask-btn { height: 40px; }
@@ -1008,13 +1011,13 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
   .field .segmented button { flex: 1; padding-left: 6px; padding-right: 6px; }
 }
 
-/* Watchlist form: labels on one line, the error sits under its field */
+/* this is the watchlist form so that labels stay on one line and the error sits under its field */
 #alert-form .form-row { align-items: flex-start; }
 #alert-form .form-row > .btn { margin-top: 25px; }
 #alert-form .field-error { margin: 2px 0 0; max-width: 260px; }
 @media (max-width: 600px) { #alert-form .form-row > .btn { margin-top: 4px; width: 100%; } #alert-form .field-error { max-width: none; } }
 
-/* Analyst: thinking state and the typing caret while an answer streams in */
+/* this is the analyst's thinking state and caret so that the user can see an answer coming in */
 .msg-bot .bubble.thinking { display: inline-flex; align-items: center; gap: 10px; padding: 12px 16px; color: var(--ink-2); font-size: 14px; }
 .bubble.thinking .typing { padding: 0; }
 .thinking-text { animation: rise .3s var(--ease) both; }
@@ -1045,7 +1048,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .nav-links > .seg-thumb { border-radius: var(--radius-sm); background: var(--surface-sunk); }
 .nav-links.has-thumb a[aria-current="page"] { background: transparent; }
 
-/* Forecast key figures */
+/* these are the forecast key figures so that the main numbers stand out */
 .fc-figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 24px; align-items: start; padding: 18px 22px; }
 .fig-label { font-size: 13px; color: var(--ink-2); letter-spacing: 0; }
 .fig-when { color: var(--ink-3); }
@@ -1063,7 +1066,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 @media (max-width: 900px) { .fc-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px 18px; } }
 @media (max-width: 340px) { .fc-figures { grid-template-columns: minmax(0, 1fr); } }
 
-/* Charts: first appearance fades in; later changes morph (js/charts.js) */
+/* charts fade in the first time and later changes morph (js/charts.js) so that updates look calm */
 .chart > svg { animation: fade-in var(--dur-card) var(--ease-out) both; }
 .chart .region { fill: var(--accent-wash); }
 .chart .guide { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6; }
@@ -1080,7 +1083,7 @@ table.data tr.highlight td:last-child { border-radius: 0 8px 8px 0; }
 .chart.is-panning .hit { cursor: grabbing; }
 .chart.is-panning { user-select: none; }
 
-/* Policy Lab: choose an event to see it on the chart */
+/* this is the Policy Lab event picker so that choosing an event shows it on the chart */
 .event-picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .event-picker:empty { display: none; }
 .event-picker .filter-label { margin-right: 4px; }

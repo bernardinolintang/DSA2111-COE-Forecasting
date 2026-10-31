@@ -25,11 +25,14 @@ export function fanLegend({ baseline = false } = {}) {
  * Returns { opts, last, rows } (rows: every point, newest first, for the table view).
  */
 export function fanOptions({ history, steps, name, height, baseline = null, markers = [], zoom = true, startZoomed = false }) {
+  // this turns history and forecast into chart points so that both can share one time axis
   const hist = history.map((p) => ({ x: exerciseDate(p.month, p.bidding_no), y: p.premium, label: p.label }));
   const last = hist[hist.length - 1];
   const fc = steps.map((s) => ({ ...s, x: exerciseDate(s.month, s.bidding_no) }));
   const base = baseline ? baseline.map((s) => ({ x: exerciseDate(s.month, s.bidding_no), y: s.q50 })) : null;
+  // this starts each band at the latest result so that the fan opens from one point
   const withOrigin = (lo, hi) => [{ x: last.x, lo: last.y, hi: last.y }, ...fc.map((s) => ({ x: s.x, lo: s[lo], hi: s[hi] }))];
+  // this indexes every point by time so that the tooltip can find it fast
   const byTime = new Map([...hist.map((p) => [+p.x, { type: "actual", ...p }]), ...fc.map((s) => [+s.x, { type: "fc", ...s }])]);
   const baseAt = base ? new Map(base.map((p) => [+p.x, p.y])) : null;
 
@@ -50,9 +53,12 @@ export function fanOptions({ history, steps, name, height, baseline = null, mark
     xMarks: fc.map((s) => s.x),
     markers,
     zoom, startZoomed,
-    // "Zoom to forecast" frames the last half-year and the six forecast exercises.
+    // "Zoom to forecast" frames the last half-year and the six forecast exercises so that the fan
+    // is easy to read
     focus: fc.length ? { x0: hist[Math.max(0, hist.length - 13)].x, x1: fc[fc.length - 1].x, label: "Zoom to forecast" } : null,
     yFormat: moneyShort,
+    // this builds the tooltip for the point under the cursor so that recorded and forecast points
+    // read differently
     tooltip: (x) => {
       const d = byTime.get(+x);
       if (!d) return null;
@@ -72,6 +78,7 @@ export function fanOptions({ history, steps, name, height, baseline = null, mark
 
 /** History only: what the charts fall back to when no forecast is available. */
 export function historyOptions({ history, name, height, markers = [] }) {
+  // this keeps the same line style as the fan so that the chart looks the same with no forecast
   const hist = history.map((p) => ({ x: exerciseDate(p.month, p.bidding_no), y: p.premium, label: p.label }));
   const byTime = new Map(hist.map((p) => [+p.x, p]));
   return {
@@ -90,6 +97,8 @@ export function historyOptions({ history, name, height, markers = [] }) {
  * (history is drawn as is); with reduced motion it simply appears.
  */
 export function drawFan(container, opts, last) {
+  // this starts the forecast flat on the latest result then opens it so that the fan appears to
+  // grow out of today
   if (reducedMotion() || !last) return lineChart(container, opts);
   const fanned = new Set(["median", "baseline"]);
   const flat = (pts) => pts.map((p) => ("lo" in p ? { ...p, lo: last.y, hi: last.y } : { ...p, y: last.y }));

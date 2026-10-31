@@ -26,6 +26,7 @@ from .policy_events import POLICY_EVENTS
 
 log = logging.getLogger(__name__)
 
+# this lists where the schema can be so that the code works in docker and in a normal checkout
 SCHEMA_CANDIDATES = [
     Path("/app/schema.sql"),                                   # inside the Docker image
     config.PACKAGE_DIR.parent.parent / "db" / "init.sql",      # repository checkout
@@ -33,6 +34,7 @@ SCHEMA_CANDIDATES = [
 KEEP_RUNS = 10          # older model runs are pruned to keep the database small
 
 
+# this makes the connection engine, the pre ping is there so that a dead connection gets replaced
 def get_engine(url: str | None = None) -> Engine:
     return create_engine(url or config.DATABASE_URL, pool_pre_ping=True)
 
@@ -52,6 +54,7 @@ def wait_for_db(engine: Engine, timeout_s: int = 90) -> None:
             time.sleep(2)
 
 
+# this applies the schema file so that the pipeline can set up an empty database by itself
 def ensure_schema(engine: Engine) -> None:
     path = next((p for p in SCHEMA_CANDIDATES if p.exists()), None)
     if path is None:
@@ -60,6 +63,8 @@ def ensure_schema(engine: Engine) -> None:
         conn.exec_driver_sql(path.read_text(encoding="utf-8"))
 
 
+# this reads the table definition from postgres so that init.sql stays the only place columns are
+# defined
 def _table(engine: Engine, name: str) -> Table:
     return Table(name, MetaData(), autoload_with=engine)
 
@@ -75,6 +80,7 @@ def _clean(value):
     return value
 
 
+# this cleans every row so that a dataframe can be inserted directly
 def _records(df: pd.DataFrame) -> list[dict]:
     return [{k: _clean(v) for k, v in row.items()} for row in df.to_dict(orient="records")]
 
@@ -86,14 +92,17 @@ def upsert(engine: Engine, table_name: str, df: pd.DataFrame, keys: list[str]) -
     table = _table(engine, table_name)
     rows = _records(df)
     stmt = insert(table)
+    # this updates all non-key columns on conflict so that a rerun refreshes rows and does not fail
     updates = {c.name: stmt.excluded[c.name] for c in table.columns if c.name in df.columns and c.name not in keys}
     stmt = stmt.on_conflict_do_update(index_elements=keys, set_=updates) if updates else stmt.on_conflict_do_nothing()
     with engine.begin() as conn:
+        # this writes 2000 rows at a time so that one statement does not get too big
         for start in range(0, len(rows), 2000):
             conn.execute(stmt, rows[start:start + 2000])
     return len(rows)
 
 
+# this does a plain insert so that new run outputs are added as they are
 def insert_rows(engine: Engine, table_name: str, df: pd.DataFrame) -> int:
     if df.empty:
         return 0
@@ -106,6 +115,7 @@ def insert_rows(engine: Engine, table_name: str, df: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 # Raw data
 # ---------------------------------------------------------------------------
+# this saves raw results, macro data and policy events so that the API can read them
 def save_raw_data(engine: Engine, coe: pd.DataFrame, macro: pd.DataFrame) -> None:
     n_coe = upsert(engine, "coe_results", coe, ["month", "bidding_no", "category"])
     n_macro = upsert(engine, "macro_indicators", macro, ["month", "indicator"])
@@ -120,6 +130,7 @@ def save_raw_data(engine: Engine, coe: pd.DataFrame, macro: pd.DataFrame) -> Non
 # ---------------------------------------------------------------------------
 # Model runs
 # ---------------------------------------------------------------------------
+# this opens a new model run and returns its id so that all outputs can point to it
 def start_run(engine: Engine, model_name: str, params: dict) -> int:
     with engine.begin() as conn:
         return conn.execute(
@@ -128,6 +139,7 @@ def start_run(engine: Engine, model_name: str, params: dict) -> int:
         ).scalar_one()
 
 
+# this closes the run with its status and metrics so that the API only serves finished runs
 def finish_run(engine: Engine, run_id: int, status: str, *, metrics: dict | None = None,
                data_through=None, last_bidding: int | None = None, duration_s: float | None = None,
                notes: str | None = None) -> None:
